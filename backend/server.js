@@ -6,11 +6,15 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors({
-    origin: ['http://localhost:5173', 'http://localhost:3000'], // Add whichever port Vite/React is using
+    origin: [
+        'http://localhost:5173', 
+        'http://localhost:3000',
+        'https://your-live-frontend-url-goes-here.vercel.app' // <-- ADD THIS LINE!
+    ],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
-app.use(express.json()); 
+app.use(express.json());    
 
 // --- IMPORT ROUTES ---
 const riskRoutes = require('./routes/riskRoutes');
