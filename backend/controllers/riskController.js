@@ -10,7 +10,7 @@ exports.generatePrediction = async (req, res) => {
 
     try {
         // 1. Get the data from Python FIRST
-        const pythonResponse = await axios.post('http://127.0.0.1:8000/predict', {
+        const pythonResponse = await axios.post('https://omnisight-ml-engine.onrender.com/predict', {
             ticker: ticker
         });
         
@@ -49,7 +49,7 @@ exports.manualCalculation = async (req, res) => {
 
     try {
         // Send data to the NEW Python manual-predict route
-        const pythonResponse = await axios.post('http://127.0.0.1:8000/manual-predict', {
+        const pythonResponse = await axios.post('https://omnisight-ml-engine.onrender.com/manual-predict', {
             marketVolatility: Number(marketVolatility),
             revenueGrowth: Number(revenueGrowth)
         });
