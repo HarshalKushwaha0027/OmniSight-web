@@ -9,7 +9,7 @@ app.use(cors({
     origin: [
         'http://localhost:5173', 
         'http://localhost:3000',
-        'https://your-live-frontend-url-goes-here.vercel.app' // <-- ADD THIS LINE!
+        'https://omni-sight-web.vercel.app' 
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
