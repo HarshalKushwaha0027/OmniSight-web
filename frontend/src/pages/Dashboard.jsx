@@ -42,7 +42,7 @@ function Dashboard() {
 
     // Ask Node.js for global stock suggestions
     try {
-      const response = await fetch(`http://localhost:5000/api/search?q=${val}`);
+      const response = await fetch(`https://omnisight-api.onrender.com/api/search?q=${val}`);
       const data = await response.json();
       setSuggestions(data);
       setShowSuggestions(true);
@@ -60,7 +60,7 @@ function Dashboard() {
     setSearchQuery(tickerToSearch.toUpperCase()); 
 
     try {
-      const response = await fetch("http://localhost:5000/api/predict", {
+      const response = await fetch("https://omnisight-api.onrender.com/api/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker: tickerToSearch.toUpperCase() }),
@@ -91,7 +91,7 @@ function Dashboard() {
 
   const fetchHistory = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/history");
+      const response = await fetch("https://omnisight-api.onrender.com/api/history");
       const data = await response.json();
       if (response.ok) {
         setRecentInsights(data);
@@ -125,7 +125,7 @@ function Dashboard() {
       setSearchQuery(tickerToSearch); // Update the visual search box
 
       try {
-        const response = await fetch("http://localhost:5000/api/predict", {
+        const response = await fetch("https://omnisight-api.onrender.com/api/predict", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ticker: tickerToSearch }), 
@@ -150,7 +150,7 @@ function Dashboard() {
   const handleManualCalculation = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch("http://localhost:5000/api/manual-predict", {
+      const response = await fetch("https://omnisight-api.onrender.com/api/manual-predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
