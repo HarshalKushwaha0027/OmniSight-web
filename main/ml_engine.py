@@ -178,8 +178,23 @@ def calculate_manual_risk(data: ManualData):
     else:
         category = "Low"
 
+    # --- Dynamic Confidence Logic ---
+    
+    # 1. Calculate how far the score is from the ambiguous middle (50)
+    distance_from_center = abs(final_risk_score - 50)
+    
+    # 2. Scale this distance to a realistic confidence range (e.g., 70% to 98%)
+    dynamic_confidence = 70 + (distance_from_center / 50) * 28
+
+    # 3. Apply a small penalty for highly extreme/unusual inputs
+    if data.marketVolatility > 2.0 or abs(data.revenueGrowth) > 1000:
+        dynamic_confidence -= 12
+
+    # Ensure it stays within a logical percentage boundary
+    final_confidence = max(50, min(99, round(dynamic_confidence)))
+
     return {
         "risk":       final_risk_score,
-        "confidence": 92,
+        "confidence": final_confidence,
         "category":   category
     }
