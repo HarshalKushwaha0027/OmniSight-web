@@ -23,9 +23,7 @@ app.use(express.json());
 // Cache entries expire after 10 minutes (the market data doesn't change faster).
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const predictionCache = new Map(); // Map<ticker, { data, expiresAt }>
-
-app.set('predictionCache', predictionCache);
-app.set('CACHE_TTL_MS', CACHE_TTL_MS);
+ 
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 const riskRoutes = require('./routes/riskRoutes');
