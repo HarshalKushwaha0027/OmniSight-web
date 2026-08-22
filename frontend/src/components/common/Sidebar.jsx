@@ -1,59 +1,64 @@
 import { Link, useLocation } from "react-router-dom";
 
-// Each nav item: label + the section id it scrolls to on Dashboard
-const NAV_ITEMS = [
-  { label: "Overview",    id: "overview"    },
-  { label: "Warning",     id: "warning"     },
-  { label: "Systematic",  id: "systematic"  },
-  { label: "Volatility",  id: "volatility"  },
-  { label: "Residual",    id: "residual"    },
-  { label: "Prediction",  id: "prediction"  },
-  { label: "Performance", id: "performance" },
-];
-
-function Sidebar({ sections = {} }) {
+// Accept the scroll-to-section helper from DashboardLayout as a prop
+function Sidebar({ onNavigate }) {
   const location = useLocation();
-  const isDashboard = location.pathname === "/dashboard";
+  const isActive = location.pathname === "/dashboard";
 
-  const scrollTo = (id) => {
-    // If a ref map was passed, use it; otherwise fall back to getElementById
-    const el = sections[id]?.current ?? document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth" });
-    }
-  };
+  const sections = [
+    { id: "overview",     label: "Overview" },
+    { id: "warning",      label: "Early Warning" },
+    { id: "systematic",   label: "Systematic Risk" },
+    { id: "volatility",   label: "Volatility" },
+    { id: "residual",     label: "Residual Shock" },
+    { id: "prediction",   label: "Predictions" },
+    { id: "performance",  label: "Model Performance" },
+  ];
 
   return (
-    // h-screen + sticky top-0 = always full viewport height, stays in place while content scrolls
-    <aside className="sticky top-0 h-screen w-64 shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col p-6 overflow-y-auto">
-      <h2 className="text-2xl font-bold mb-10 text-white">Dashboard</h2>
+    <aside
+      className="
+        fixed left-0 top-0
+        w-56
+        h-screen            /* full viewport height */
+        bg-slate-900
+        border-r border-slate-800
+        flex flex-col
+        p-6
+        z-40
+        overflow-y-auto     /* scroll if content ever overflows */
+      "
+    >
+      {/* Logo / title */}
+      <h2 className="text-xl font-bold mb-10 text-white tracking-tight">
+        Omni<span className="text-[#00AB55]">Sight</span>
+      </h2>
 
-      <nav className="flex flex-col gap-1">
-        {isDashboard ? (
-          // On the Dashboard page: smooth-scroll to each section
-          NAV_ITEMS.map(({ label, id }) => (
-            <button
-              key={id}
-              onClick={() => scrollTo(id)}
-              className="text-left px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition text-sm"
-            >
-              {label}
-            </button>
-          ))
-        ) : (
-          // On other pages: normal links
-          <>
-            <Link to="/"          className="px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition text-sm">Home</Link>
-            <Link to="/dashboard" className="px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition text-sm">Dashboard</Link>
-            <Link to="/History"   className="px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition text-sm">History</Link>
-          </>
-        )}
+      {/* Navigation links */}
+      <nav className="flex flex-col gap-1 text-slate-400 flex-1">
+        {sections.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => onNavigate && onNavigate(id)}
+            className="
+              text-left px-3 py-2 rounded-lg text-sm
+              hover:bg-slate-800 hover:text-white
+              transition-colors duration-150
+              focus:outline-none focus:ring-1 focus:ring-[#00AB55]/40
+            "
+          >
+            {label}
+          </button>
+        ))}
       </nav>
 
-      {/* Push version badge to the bottom */}
-      <div className="mt-auto pt-6 border-t border-slate-800">
-        <p className="text-xs text-slate-600">OmniSight v1.0</p>
-      </div>
+      {/* Bottom link back to home */}
+      <Link
+        to="/"
+        className="text-xs text-slate-600 hover:text-slate-400 transition mt-6"
+      >
+        ← Back to Home
+      </Link>
     </aside>
   );
 }
