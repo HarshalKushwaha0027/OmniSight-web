@@ -6,59 +6,66 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ─── CORS ────────────────────────────────────────────────────────────────────
+// ─── CORS ─────────────────────────────────────────────────────────────────────
 app.use(cors({
-    origin: [
-        'http://localhost:5173',
-        'http://localhost:3000',
-        'https://omni-sight-web.vercel.app'
-    ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    credentials: true
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://omni-sight-web.vercel.app',
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true,
 }));
 app.use(express.json());
 
-// ─── ROUTES ──────────────────────────────────────────────────────────────────
+// ─── Simple in-memory cache ───────────────────────────────────────────────────
+// Stores the last ML result for each ticker so repeat searches are instant.
+// Cache entries expire after 10 minutes (the market data doesn't change faster).
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const predictionCache = new Map(); // Map<ticker, { data, expiresAt }>
+
+app.set('predictionCache', predictionCache);
+app.set('CACHE_TTL_MS', CACHE_TTL_MS);
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
 const riskRoutes = require('./routes/riskRoutes');
 app.use('/api', riskRoutes);
 
 app.get('/', (req, res) => {
-    res.send('OmniSight Backend Server is running successfully!');
+  res.send('OmniSight Backend Server is running successfully!');
 });
 
-// ─── HEALTH CHECK (used by keep-alive ping) ───────────────────────────────────
-// Render and the ML service both need a /health endpoint to stay warm
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', uptime: process.uptime() });
-});
+// ─── MongoDB ──────────────────────────────────────────────────────────────────
+mongoose
+  .connect(process.env.MONGO_URI, { family: 4 })
+  .then(() => console.log('Successfully connected to MongoDB!'))
+  .catch((err) => console.error('MongoDB connection error:', err));
 
-// ─── KEEP-ALIVE: ping the ML service every 14 minutes ────────────────────────
-// Render free tier spins down after 15 min of inactivity.
-// This prevents the 30-60s cold-start lag your users experience.
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'https://your-ml-service.onrender.com';
-
-const keepAlive = () => {
-    const http = require('https');
-    const req = http.get(`${ML_SERVICE_URL}/health`, (res) => {
-        console.log(`[keep-alive] ML service ping: ${res.statusCode}`);
-    });
-    req.on('error', (err) => {
-        console.warn(`[keep-alive] ML service ping failed: ${err.message}`);
-    });
-    req.end();
-};
-
-// Start pinging after 30s (give server time to boot), then every 14 min
-setTimeout(() => {
-    keepAlive(); // ping once at startup
-    setInterval(keepAlive, 14 * 60 * 1000); // then every 14 min
-}, 30_000);
-
-// ─── MONGODB ──────────────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGO_URI, { family: 4 })
-    .then(() => console.log('Successfully connected to MongoDB!'))
-    .catch((err) => console.error('MongoDB connection error:', err));
-
+// ─── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
+  startKeepAlive();
 });
+
+// ─── Keep-alive: ping this server every 14 minutes ───────────────────────────
+// Render free tier spins down after 15 min of inactivity.
+// This self-ping prevents that, eliminating the 30-60s cold-start delay.
+function startKeepAlive() {
+  const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  const INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
+
+  setInterval(async () => {
+    try {
+      // Use native fetch (Node 18+) or fall back to http
+      if (typeof fetch !== 'undefined') {
+        await fetch(`${SELF_URL}/`);
+      } else {
+        const http = require('http');
+        http.get(`${SELF_URL}/`);
+      }
+      console.log('[keep-alive] ping sent');
+    } catch (err) {
+      console.warn('[keep-alive] ping failed:', err.message);
+    }
+  }, INTERVAL_MS);
+}
