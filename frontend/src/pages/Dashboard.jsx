@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import RiskTrendChart from "../components/dashboard/RiskTrendChart";
 import RiskDistributionChart from "../components/dashboard/RiskDistributionChart";
@@ -8,13 +8,12 @@ import SystematicRiskCard from "../components/dashboard/SystematicRiskCard";
 import VolatilityClusteringCard from "../components/dashboard/VolatilityClusteringCard";
 import ResidualShockCard from "../components/dashboard/ResidualShockCard";
 import ModelPerformancePanel from "../components/dashboard/ModelPerformancePanel";
-import { Link } from "react-router-dom";
+import RiskExplanationCard from "../components/dashboard/RiskExplanationCard";
+import ModelComparisonTable from "../components/dashboard/ModelComparisonTable";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const API_BASE = "https://omnisight-api.onrender.com/api";
-const DEBOUNCE_MS = 350; // wait 350 ms after the user stops typing before fetching
+const DEBOUNCE_MS = 350;
 
-// ─── Tiny debounce hook ───────────────────────────────────────────────────────
 function useDebounce(value, delay) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -24,7 +23,6 @@ function useDebounce(value, delay) {
   return debounced;
 }
 
-// ─── Skeleton card (shown while the first prediction loads) ──────────────────
 function SkeletonCard() {
   return (
     <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl animate-pulse">
@@ -38,104 +36,32 @@ function Dashboard() {
   const [searchParams] = useSearchParams();
   const urlTicker = searchParams.get("ticker");
 
-  // ─── State ──────────────────────────────────────────────────────────────────
-  const [recentInsights, setRecentInsights] = useState([]);
-  const [prediction, setPrediction] = useState(null); // null = not yet loaded
-  const [searchQuery, setSearchQuery] = useState(urlTicker || "");
-  const [isLoading, setIsLoading] = useState(false);
+  const [recentInsights, setRecentInsights]   = useState([]);
+  const [prediction, setPrediction]           = useState(null);
+  const [searchQuery, setSearchQuery]         = useState(urlTicker || "");
+  const [isLoading, setIsLoading]             = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
-  const [volatility, setVolatility] = useState("");
-  const [revenueGrowth, setRevenueGrowth] = useState("");
-  const [manualResult, setManualResult] = useState(null);
+  const [suggestions, setSuggestions]         = useState([]);
+  const [volatility, setVolatility]           = useState("");
+  const [revenueGrowth, setRevenueGrowth]     = useState("");
+  const [manualResult, setManualResult]       = useState(null);
 
-  // ─── Refs ───────────────────────────────────────────────────────────────────
-  const overviewRef = useRef(null);
-  const warningRef = useRef(null);
-  const systematicRef = useRef(null);
-  const volatilityRef = useRef(null);
-  const residualRef = useRef(null);
-  const predictionRef = useRef(null);
+  const overviewRef    = useRef(null);
+  const warningRef     = useRef(null);
+  const systematicRef  = useRef(null);
+  const volatilityRef  = useRef(null);
+  const residualRef    = useRef(null);
+  const predictionRef  = useRef(null);
   const performanceRef = useRef(null);
   const suggestionsRef = useRef(null);
 
-  // ─── Debounced search query (prevents a fetch on every keystroke) ────────────
   const debouncedQuery = useDebounce(searchQuery, DEBOUNCE_MS);
 
-  // ─── Fetch autocomplete suggestions (fires only after debounce settles) ─────
-  useEffect(() => {
-    const q = debouncedQuery.trim();
-    if (!q) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
-    // Don't fetch if the user has already selected this ticker
-    const controller = new AbortController();
-
-    fetch(`${API_BASE}/search?q=${q}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then((data) => {
-        setSuggestions(data);
-        setShowSuggestions(data.length > 0);
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") console.error("Suggestion fetch failed:", err);
-      });
-
-    // Cancel the in-flight request if the query changes before it resolves
-    return () => controller.abort();
-  }, [debouncedQuery]);
-
-  // ─── Close suggestions when clicking outside ────────────────────────────────
-  useEffect(() => {
-    function handleOutsideClick(e) {
-      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target)) {
-        setShowSuggestions(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, []);
-
-  // ─── Core search / predict ──────────────────────────────────────────────────
-  const executeSearch = useCallback(async (tickerToSearch) => {
-    if (!tickerToSearch.trim()) return;
-
-    setIsLoading(true);
-    setShowSuggestions(false);
-    setSearchQuery(tickerToSearch.toUpperCase());
-
-    try {
-      const response = await fetch(`${API_BASE}/predict`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: tickerToSearch.toUpperCase() }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setPrediction(data);
-      }
-    } catch (error) {
-      console.error("Network Error:", error);
-    } finally {
-      setIsLoading(false);
-      fetchHistory();
-    }
-  }, []);
-
-  const handleMainSearch = (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      executeSearch(searchQuery);
-    }
-  };
-
-  // ─── History ────────────────────────────────────────────────────────────────
+  // ── FIX 1: fetchHistory defined BEFORE executeSearch so it's in scope ──────
   const fetchHistory = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/history`);
+      // FIX 2: capital H to match your route definition /api/History
+      const response = await fetch(`${API_BASE}/History`);
       const data = await response.json();
       if (response.ok) setRecentInsights(data);
     } catch (error) {
@@ -143,22 +69,66 @@ function Dashboard() {
     }
   }, []);
 
-  // ─── Initial load + hash scroll ─────────────────────────────────────────────
+  const executeSearch = useCallback(async (tickerToSearch) => {
+    if (!tickerToSearch.trim()) return;
+    setIsLoading(true);
+    setShowSuggestions(false);
+    setSearchQuery(tickerToSearch.toUpperCase());
+    try {
+      const response = await fetch(`${API_BASE}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: tickerToSearch.toUpperCase() }),
+      });
+      const data = await response.json();
+      if (response.ok) setPrediction(data);
+    } catch (error) {
+      console.error("Network Error:", error);
+    } finally {
+      setIsLoading(false);
+      fetchHistory(); // now correctly in scope
+    }
+  }, [fetchHistory]); // FIX 1: fetchHistory listed as dependency
+
+  // Autocomplete suggestions
+  useEffect(() => {
+    const q = debouncedQuery.trim();
+    if (!q) { setSuggestions([]); setShowSuggestions(false); return; }
+    const controller = new AbortController();
+    fetch(`${API_BASE}/search?q=${q}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => { setSuggestions(data); setShowSuggestions(data.length > 0); })
+      .catch((err) => { if (err.name !== "AbortError") console.error("Suggestion fetch failed:", err); });
+    return () => controller.abort();
+  }, [debouncedQuery]);
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    function handleOutsideClick(e) {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target))
+        setShowSuggestions(false);
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  // Initial load + hash scroll
   useEffect(() => {
     const hash = window.location.hash;
     if (hash) {
-      const id = hash.replace("#", "");
       setTimeout(() => {
-        document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+        document.getElementById(hash.replace("#", ""))?.scrollIntoView({ behavior: "smooth" });
       }, 300);
     }
-
     const ticker = urlTicker ? urlTicker.toUpperCase() : "AAPL";
     setSearchQuery(ticker);
     executeSearch(ticker);
   }, [urlTicker, executeSearch]);
 
-  // ─── Manual calculator ──────────────────────────────────────────────────────
+  const handleMainSearch = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); executeSearch(searchQuery); }
+  };
+
   const handleManualCalculation = async (e) => {
     e.preventDefault();
     try {
@@ -177,82 +147,54 @@ function Dashboard() {
     }
   };
 
-  // ─── Derived values (safe even before first load) ───────────────────────────
-  const risk = prediction?.risk ?? 0;
+  const risk       = prediction?.risk ?? 0;
   const confidence = prediction?.confidence ?? 0;
-  const category = prediction?.category ?? "—";
+  const category   = prediction?.category ?? "—";
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <DashboardLayout
       sections={{
-        overview: overviewRef,
-        warning: warningRef,
-        systematic: systematicRef,
-        volatility: volatilityRef,
-        residual: residualRef,
-        prediction: predictionRef,
-        performance: performanceRef,
+        overview: overviewRef, warning: warningRef, systematic: systematicRef,
+        volatility: volatilityRef, residual: residualRef,
+        prediction: predictionRef, performance: performanceRef,
       }}
     >
       {/* Floating ticker pill */}
       <div className="fixed top-9 right-10 z-50 bg-slate-900/80 backdrop-blur-md border border-[#00AB55]/30 text-white px-5 py-2 rounded-full shadow-[0_0_15px_rgba(0,171,85,0.1)] flex items-center gap-3">
         <span className="w-2 h-2 rounded-full bg-[#00AB55] animate-pulse" />
-        <span className="font-bold tracking-wider uppercase text-sm">
-          {searchQuery || "MARKET"}
-        </span>
+        <span className="font-bold tracking-wider uppercase text-sm">{searchQuery || "MARKET"}</span>
       </div>
 
-      {/* ── Overview ─────────────────────────────────────────────────────────── */}
+      {/* ── Overview ── */}
       <div ref={overviewRef}>
         <div className="space-y-5 pt-20">
           <h1 className="text-4xl font-bold text-[#75957B]">Risk Analysis Dashboard</h1>
-          <p className="text-slate-400 mt-3 text-lg">
-            Monitor predictive insights and analytical metrics.
-          </p>
+          <p className="text-slate-400 mt-3 text-lg">Monitor predictive insights and analytical metrics.</p>
         </div>
 
         {/* Search bar */}
         <div className="relative w-[500px] mb-10" ref={suggestionsRef}>
-          <div
-            className={`flex items-center bg-slate-900 border rounded-2xl px-5 py-4 w-full transition-all duration-300 ${
-              isLoading
-                ? "border-slate-700 opacity-60 bg-slate-800"
-                : "border-slate-800 focus-within:border-[#00AB55]"
-            }`}
-          >
-            <svg
-              className="h-5 w-5 text-slate-400 mr-3 shrink-0"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.3-4.3" />
+          <div className={`flex items-center bg-slate-900 border rounded-2xl px-5 py-4 w-full transition-all duration-300 ${
+            isLoading ? "border-slate-700 opacity-60 bg-slate-800" : "border-slate-800 focus-within:border-[#00AB55]"
+          }`}>
+            <svg className="h-5 w-5 text-slate-400 mr-3 shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
             </svg>
             <input
               type="search"
               placeholder={isLoading ? "Analyzing Data…" : "Search for analysis (e.g. AAPL)…"}
               value={searchQuery}
-              // Only update local state — the debounce hook handles fetch timing
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleMainSearch}
               disabled={isLoading}
               className="bg-transparent outline-none w-full text-white placeholder-slate-500 uppercase disabled:cursor-not-allowed"
             />
           </div>
-
-          {/* Autocomplete dropdown */}
           {showSuggestions && !isLoading && suggestions.length > 0 && (
             <div className="absolute top-full left-0 w-full mt-2 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden z-50 shadow-2xl">
               {suggestions.map((stock) => (
-                <div
-                  key={stock.ticker}
-                  onClick={() => executeSearch(stock.ticker)}
-                  className="px-5 py-3 hover:bg-slate-700 cursor-pointer flex justify-between items-center border-b border-slate-700/50 last:border-0 transition"
-                >
+                <div key={stock.ticker} onClick={() => executeSearch(stock.ticker)}
+                  className="px-5 py-3 hover:bg-slate-700 cursor-pointer flex justify-between items-center border-b border-slate-700/50 last:border-0 transition">
                   <span className="font-bold text-white">{stock.ticker}</span>
                   <span className="text-sm text-slate-400">{stock.name}</span>
                 </div>
@@ -261,12 +203,10 @@ function Dashboard() {
           )}
         </div>
 
-        {/* KPI cards — show skeleton while loading first prediction */}
+        {/* KPI cards */}
         {isLoading && !prediction ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <SkeletonCard />
-            <SkeletonCard />
-            <SkeletonCard />
+            <SkeletonCard /><SkeletonCard /><SkeletonCard />
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -280,29 +220,22 @@ function Dashboard() {
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Category</h2>
-              <p
-                className={`text-5xl font-bold ${
-                  category === "High"
-                    ? "text-red-400"
-                    : category === "Moderate"
-                    ? "text-yellow-400"
-                    : "text-green-400"
-                }`}
-              >
-                {category} {category !== "—" && "Risk"}
+              <p className={`text-5xl font-bold ${
+                category === "High" ? "text-red-400" : category === "Moderate" ? "text-yellow-400" : "text-green-400"
+              }`}>
+                {category}{category !== "—" && " Risk"}
               </p>
             </div>
           </div>
         )}
       </div>
 
-      {/* ── Chart sections ───────────────────────────────────────────────────── */}
+      {/* ── Sections ── */}
       <div ref={warningRef}>
-        <EarlyWarningCard
-          probability={prediction?.early_warning ?? 0}
-          status={prediction?.category ?? "Low"}
-        />
+        <EarlyWarningCard probability={prediction?.early_warning ?? 0} status={prediction?.category ?? "Low"} />
       </div>
+
+      <RiskExplanationCard explanation={prediction?.explanation} />
 
       <div ref={systematicRef}>
         <SystematicRiskCard chartData={prediction?.charts} />
@@ -331,13 +264,11 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* ── Recent insights table ────────────────────────────────────────────── */}
+      {/* ── Recent insights ── */}
       <div className="mt-10 bg-slate-900 border border-slate-800 rounded-2xl p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-semibold">Recent Risk Insights</h2>
-          <Link to="/History" className="text-sm text-slate-400 hover:text-white transition">
-            View All
-          </Link>
+          <Link to="/History" className="text-sm text-slate-400 hover:text-white transition">View All</Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -351,32 +282,21 @@ function Dashboard() {
             </thead>
             <tbody>
               {recentInsights.length === 0 ? (
-                <tr>
-                  <td colSpan="4" className="text-center py-6 text-slate-500">
-                    No recent insights found.
-                  </td>
-                </tr>
+                <tr><td colSpan="4" className="text-center py-6 text-slate-500">No recent insights found.</td></tr>
               ) : (
                 recentInsights.map((item, index) => (
-                  <tr
-                    key={item._id || index}
-                    className="border-b border-slate-800/50 hover:bg-slate-800/30 transition"
-                  >
+                  <tr key={item._id || index} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
                     <td className="py-4 font-semibold text-white">{item.ticker}</td>
                     <td className="py-4 text-slate-300">{item.riskScore}</td>
                     <td className="py-4 text-slate-300">{item.confidence}%</td>
                     <td className="py-4">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          item.category === "High"
-                            ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                            : item.category === "Moderate"
-                            ? "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
-                            : "bg-green-500/10 text-green-400 border border-green-500/20"
-                        }`}
-                      >
-                        {item.category} Risk
-                      </span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                        item.category === "High"
+                          ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                          : item.category === "Moderate"
+                          ? "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
+                          : "bg-green-500/10 text-green-400 border border-green-500/20"
+                      }`}>{item.category} Risk</span>
                     </td>
                   </tr>
                 ))
@@ -386,60 +306,36 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* ── Manual calculator ────────────────────────────────────────────────── */}
-      <div
-        id="prediction"
-        ref={predictionRef}
-        className="mt-10 bg-slate-900 border border-slate-800 rounded-2xl p-8"
-      >
+      {/* ── Manual calculator ── */}
+      <div id="prediction" ref={predictionRef} className="mt-10 bg-slate-900 border border-slate-800 rounded-2xl p-8">
         <h2 className="text-3xl font-semibold mb-8">Generate Risk Prediction</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-slate-400 mb-3">Market Volatility</label>
-            <input
-              type="number"
-              placeholder="Enter value"
-              value={volatility}
+            <input type="number" placeholder="Enter value" value={volatility}
               onChange={(e) => setVolatility(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 outline-none text-white focus:border-[#00AB55] transition"
-            />
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 outline-none text-white focus:border-[#00AB55] transition" />
           </div>
           <div>
             <label className="block text-slate-400 mb-3">Revenue Growth</label>
-            <input
-              type="number"
-              placeholder="Enter value"
-              value={revenueGrowth}
+            <input type="number" placeholder="Enter value" value={revenueGrowth}
               onChange={(e) => setRevenueGrowth(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 outline-none text-white focus:border-[#00AB55] transition"
-            />
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 outline-none text-white focus:border-[#00AB55] transition" />
           </div>
         </div>
-        <button
-          onClick={handleManualCalculation}
-          className="mt-8 px-6 py-3 rounded-xl bg-[#00AB55] hover:bg-[#007B55] transition font-semibold"
-        >
+        <button onClick={handleManualCalculation}
+          className="mt-8 px-6 py-3 rounded-xl bg-[#00AB55] hover:bg-[#007B55] transition font-semibold">
           Generate Prediction
         </button>
-
         <div className="mt-8 bg-slate-950 border border-slate-800 rounded-2xl p-6">
           <h3 className="text-xl font-semibold mb-4">Prediction Result</h3>
           {manualResult ? (
             <div className="mt-4">
-              <p
-                className={`text-5xl font-bold ${
-                  manualResult.category === "High"
-                    ? "text-red-400"
-                    : manualResult.category === "Moderate"
-                    ? "text-yellow-400"
-                    : "text-green-400"
-                }`}
-              >
-                {manualResult.category} Risk
-              </p>
-              <p className="text-slate-400 mt-4">
-                Score: {manualResult.risk} | Confidence: {manualResult.confidence}%
-              </p>
+              <p className={`text-5xl font-bold ${
+                manualResult.category === "High" ? "text-red-400"
+                : manualResult.category === "Moderate" ? "text-yellow-400" : "text-green-400"
+              }`}>{manualResult.category} Risk</p>
+              <p className="text-slate-400 mt-4">Score: {manualResult.risk} | Confidence: {manualResult.confidence}%</p>
             </div>
           ) : (
             <p className="text-slate-500 mt-2">Enter values above and click Generate.</p>
@@ -447,10 +343,18 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* ── Model performance ────────────────────────────────────────────────── */}
+      {/* ── Performance + Comparison ── */}
       <div id="performance" ref={performanceRef}>
-        <ModelPerformancePanel performanceData={prediction?.performance} />
+        <ModelPerformancePanel
+          performanceData={prediction?.performance}
+          bestModel={prediction?.best_model}
+        />
+        <ModelComparisonTable
+          modelComparison={prediction?.model_comparison}
+          bestModel={prediction?.best_model}
+        />
       </div>
+
     </DashboardLayout>
   );
 }
