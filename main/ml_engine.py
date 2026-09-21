@@ -18,11 +18,22 @@ import math
 
 app = FastAPI()
 
+# ─── Human-readable labels for every engineered feature ──────────────────────
 FEATURE_LABELS = {
-    "Vol":  "Volatility",
-    "Beta": "Market Beta",
-    "R2":   "Systematic Risk (R²)",
+    "Vol":              "Volatility",
+    "Beta":             "Market Beta",
+    "R2":               "Systematic Risk (R²)",
+    "MeanReturn":       "Rolling Mean Return",
+    "Momentum":         "Momentum",
+    "Drawdown":         "Current Drawdown",
+    "MaxDrawdown":      "Maximum Drawdown",
+    "ResidualVol":      "Residual Volatility",
+    "MarketCorr":       "Market Correlation",
+    "VolChange":        "Volatility Change",
+    "Sharpe":           "Sharpe Ratio",
 }
+FEATURE_NAMES = list(FEATURE_LABELS.keys())   # fixed order used everywhere
+
 
 # ─── Helper: evaluate any trained classifier on the test set ─────────────────
 def evaluate_model(model, X_test, y_test):
@@ -41,6 +52,39 @@ def evaluate_model(model, X_test, y_test):
         return {"auc": 0, "precision": 0, "recall": 0, "f1": 0, "accuracy": 0}
 
 
+# ─── Helper: feature importance for ANY of the 3 models ──────────────────────
+def get_feature_importance(model, model_name):
+    """
+    Returns a sorted list of {feature, importance} for the given model.
+    - Tree models (RF, GBM) expose .feature_importances_ directly.
+    - Logistic Regression uses the absolute value of its coefficients,
+      normalised to sum to 1 so it's comparable to tree-based importance.
+    """
+    try:
+        if model_name == "Logistic Regression":
+            raw = np.abs(model.coef_[0])
+        else:
+            raw = model.feature_importances_
+
+        total = raw.sum()
+        normalised = raw / total if total > 0 else raw
+
+        importance = [
+            {
+                "feature":    FEATURE_LABELS[fname],
+                "raw_name":   fname,
+                "importance": round(float(val), 4),
+            }
+            for fname, val in zip(FEATURE_NAMES, normalised)
+        ]
+        importance.sort(key=lambda d: d["importance"], reverse=True)
+        return importance
+
+    except Exception as e:
+        print(f"Feature importance error ({model_name}): {e}")
+        return []
+
+
 # ─── Helper: SHAP drivers ─────────────────────────────────────────────────────
 def get_shap_drivers(best_model, model_name, X_train, X_ml):
     try:
@@ -56,31 +100,24 @@ def get_shap_drivers(best_model, model_name, X_train, X_ml):
             base_val = float(base[1] if isinstance(base, (list, np.ndarray)) else base)
 
         else:
-            # FIX 1: TreeExplainer for RF returns shape (n_samples, n_features, n_classes)
-            # We must use check_additivity=False and handle the 3D array correctly.
             explainer = shap.TreeExplainer(best_model)
             shap_vals = explainer.shap_values(latest_row, check_additivity=False)
 
             if isinstance(shap_vals, list):
-                # Old SHAP: list of [class-0 array, class-1 array]
-                # Each array shape: (n_samples, n_features)
                 class1 = np.array(shap_vals[1])
                 raw = class1[0] if class1.ndim == 2 else class1
                 base_val = float(np.array(explainer.expected_value)[1])
             elif isinstance(shap_vals, np.ndarray) and shap_vals.ndim == 3:
-                # New SHAP: single array of shape (n_samples, n_features, n_classes)
-                raw = shap_vals[0, :, 1]   # sample 0, all features, class 1
+                raw = shap_vals[0, :, 1]
                 ev = explainer.expected_value
                 base_val = float(ev[1] if hasattr(ev, '__len__') else ev)
             else:
-                # GBM: single 2D array (n_samples, n_features)
                 raw = np.array(shap_vals)[0]
                 ev = explainer.expected_value
                 base_val = float(ev[0] if hasattr(ev, '__len__') else ev)
 
-        feature_names = ["Vol", "Beta", "R2"]
         drivers = []
-        for fname, sv in zip(feature_names, raw):
+        for fname, sv in zip(FEATURE_NAMES, raw):
             sv_float = float(sv)
             drivers.append({
                 "feature":    FEATURE_LABELS[fname],
@@ -116,54 +153,107 @@ def generate_risk_prediction(data: PredictionData):
     except Exception:
         raise HTTPException(status_code=400, detail="Ticker not found or network error.")
 
-    # -------- 2. FEATURE ENGINEERING --------
-    rolling_volatility = pair_data[asset].rolling(window=30).std() * np.sqrt(252)
+    asset_returns  = pair_data[asset]
+    market_returns = pair_data[market]
 
-    X_static = sm.add_constant(pair_data[market])
-    Y_static = pair_data[asset]
+    # -------- 2. BASELINE FEATURES (existing) --------
+    rolling_volatility = asset_returns.rolling(window=30).std() * np.sqrt(252)
+
+    X_static = sm.add_constant(market_returns)
+    Y_static = asset_returns
 
     rols             = RollingOLS(Y_static, X_static, window=63).fit()
     rolling_beta_ols = rols.params[market]
     rolling_rsquared = rols.rsquared
 
-    # -------- 3. BUILD ML DATASET --------
-    future_vol = pair_data[asset].rolling(window=63).std().shift(-63) * np.sqrt(252)
+    # -------- 3. NEW ENGINEERED FEATURES --------
+
+    # Rolling Mean Return — average daily return over the last 30 days (annualised)
+    rolling_mean_return = asset_returns.rolling(window=30).mean() * 252
+
+    # Momentum — cumulative return over the last 90 trading days (~1 quarter)
+    momentum = asset_returns.rolling(window=90).apply(
+        lambda x: (1 + x).prod() - 1, raw=False
+    )
+
+    # Cumulative price index (used for drawdown calcs) — starts at 1.0
+    cumulative = (1 + asset_returns).cumprod()
+
+    # Current Drawdown — % drop from the running peak, as of today
+    running_max      = cumulative.cummax()
+    drawdown          = (cumulative - running_max) / running_max
+
+    # Maximum Drawdown — worst drawdown over a trailing 252-day (1yr) window
+    max_drawdown = drawdown.rolling(window=252, min_periods=30).min()
+
+    # Residual Volatility — std dev of the CAPM regression residuals (rolling)
+    # This isolates stock-specific risk from market-wide risk.
+    residual_vol = (asset_returns - rolling_beta_ols * market_returns).rolling(
+        window=30
+    ).std() * np.sqrt(252)
+
+    # Market Correlation — rolling correlation between asset and market returns
+    market_corr = asset_returns.rolling(window=63).corr(market_returns)
+
+    # Volatility Change — how fast volatility itself is changing (5-day rate of change)
+    vol_change = rolling_volatility.pct_change(periods=5)
+
+    # Sharpe Ratio — rolling risk-adjusted return (assumes 0% risk-free rate for simplicity)
+    sharpe = (
+        asset_returns.rolling(window=63).mean()
+        / asset_returns.rolling(window=63).std()
+    ) * np.sqrt(252)
+
+    # -------- 4. BUILD ML DATASET --------
+    # Label: will volatility spike into the top 20% over the NEXT 63 trading days?
+    future_vol = asset_returns.rolling(window=63).std().shift(-63) * np.sqrt(252)
     y_label    = (future_vol >= future_vol.quantile(0.80)).astype(int)
 
     ml_df = pd.DataFrame({
-        "Vol":    rolling_volatility,
-        "Beta":   rolling_beta_ols,
-        "R2":     rolling_rsquared,
-        "Target": y_label,
-    }).dropna()
+        "Vol":         rolling_volatility,
+        "Beta":        rolling_beta_ols,
+        "R2":          rolling_rsquared,
+        "MeanReturn":  rolling_mean_return,
+        "Momentum":    momentum,
+        "Drawdown":    drawdown,
+        "MaxDrawdown": max_drawdown,
+        "ResidualVol": residual_vol,
+        "MarketCorr":  market_corr,
+        "VolChange":   vol_change,
+        "Sharpe":      sharpe,
+        "Target":      y_label,
+    }).replace([np.inf, -np.inf], np.nan).dropna()
 
-    X_ml = ml_df[["Vol", "Beta", "R2"]]
+    if len(ml_df) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough historical data to train a reliable model for this ticker."
+        )
+
+    X_ml = ml_df[FEATURE_NAMES]
     y_ml = ml_df["Target"]
 
     X_train, X_test, y_train, y_test = train_test_split(
         X_ml, y_ml, test_size=0.2, stratify=y_ml, random_state=42
     )
 
-    # -------- 4. TRAIN ALL THREE MODELS --------
-    # FIX 2: Regularise RF and GBM to prevent overfitting (AUC 0.98 = memorised training data)
-    # max_depth=4 and min_samples_leaf=10 stop the trees from growing deep enough to memorise.
-    # n_estimators reduced to 50 to keep response time fast on Render free tier.
+    # -------- 5. TRAIN ALL THREE MODELS --------
     models = {
         "Logistic Regression": LogisticRegression(
-            class_weight="balanced", max_iter=1000
+            class_weight="balanced", max_iter=2000
         ),
         "Random Forest": RandomForestClassifier(
             n_estimators=50,
-            max_depth=4,            # prevents memorisation
-            min_samples_leaf=10,    # each leaf needs at least 10 samples
+            max_depth=4,
+            min_samples_leaf=10,
             class_weight="balanced",
             random_state=42
         ),
         "Gradient Boosting": GradientBoostingClassifier(
             n_estimators=50,
-            max_depth=3,            # shallow trees = less overfit
-            learning_rate=0.05,     # slower learning = better generalisation
-            subsample=0.8,          # stochastic boosting reduces variance
+            max_depth=3,
+            learning_rate=0.05,
+            subsample=0.8,
             random_state=42
         ),
     }
@@ -184,16 +274,17 @@ def generate_risk_prediction(data: PredictionData):
             "accuracy":  metrics["accuracy"],
         })
 
-    # -------- 5. PICK THE BEST MODEL (by F1, not AUC) --------
-    # FIX 2 continued: use F1 as tiebreaker — AUC can be gamed by an overfit model,
-    # but F1 balances precision and recall on the actual predictions.
+    # -------- 6. PICK THE BEST MODEL (by F1, AUC as tiebreaker) --------
     best_entry      = max(comparison, key=lambda m: (m["f1"], m["auc"]))
     best_model_name = best_entry["model"]
     best_model      = trained[best_model_name]
 
     print(f"[{asset}] Best model: {best_model_name} (AUC {best_entry['auc']}, F1 {best_entry['f1']})")
 
-    # -------- 6. RISK SCORE --------
+    # -------- 7. FEATURE IMPORTANCE (NEW) --------
+    feature_importance = get_feature_importance(best_model, best_model_name)
+
+    # -------- 8. RISK SCORE --------
     risk_prob        = best_model.predict_proba(X_ml.tail(1))[0][1] * 100
     model_confidence = max(risk_prob, 100 - risk_prob)
 
@@ -211,10 +302,10 @@ def generate_risk_prediction(data: PredictionData):
     else:
         category = "Low"
 
-    # -------- 7. SHAP --------
+    # -------- 9. SHAP --------
     drivers, base_value = get_shap_drivers(best_model, best_model_name, X_train, X_ml)
 
-    # -------- 8. ROC + PR curves --------
+    # -------- 10. ROC + PR curves --------
     try:
         y_test_probs             = best_model.predict_proba(X_test)[:, 1]
         fpr, tpr, _              = roc_curve(y_test, y_test_probs)
@@ -225,12 +316,12 @@ def generate_risk_prediction(data: PredictionData):
         print(f"Curve error: {e}")
         roc_data, pr_data = [], []
 
-    # -------- 9. STATIC OLS METRICS --------
+    # -------- 11. STATIC OLS METRICS --------
     model_static        = sm.OLS(Y_static, X_static).fit()
     current_beta_static = model_static.params.iloc[1]
     current_r2          = model_static.rsquared
 
-    # -------- 10. CHART DATA --------
+    # -------- 12. CHART DATA --------
     def clean_nan(lst):
         return [0 if (isinstance(x, float) and math.isnan(x)) else round(float(x), 4) for x in lst]
 
@@ -243,7 +334,7 @@ def generate_risk_prediction(data: PredictionData):
     moderate_count = sum(1 for p in risk_trend_list if 35 < p <= 60)
     low_count      = sum(1 for p in risk_trend_list if p <= 35)
 
-    # -------- 11. RETURN --------
+    # -------- 13. RETURN --------
     return {
         "risk":          round(composite_risk),
         "early_warning": round(risk_prob),
@@ -255,6 +346,9 @@ def generate_risk_prediction(data: PredictionData):
             "metrics": best_entry,
         },
         "model_comparison": comparison,
+
+        # NEW: feature importance ranking for the selected model
+        "feature_importance": feature_importance,
 
         "explanation": {
             "base_value": base_value,
