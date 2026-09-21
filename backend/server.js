@@ -42,28 +42,4 @@ mongoose
 // ─── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  startKeepAlive();
 });
-
-// ─── Keep-alive: ping this server every 14 minutes ───────────────────────────
-// Render free tier spins down after 15 min of inactivity.
-// This self-ping prevents that, eliminating the 30-60s cold-start delay.
-function startKeepAlive() {
-  const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-  const INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
-
-  setInterval(async () => {
-    try {
-      // Use native fetch (Node 18+) or fall back to http
-      if (typeof fetch !== 'undefined') {
-        await fetch(`${SELF_URL}/`);
-      } else {
-        const http = require('http');
-        http.get(`${SELF_URL}/`);
-      }
-      console.log('[keep-alive] ping sent');
-    } catch (err) {
-      console.warn('[keep-alive] ping failed:', err.message);
-    }
-  }, INTERVAL_MS);
-}
