@@ -10,6 +10,7 @@ import ResidualShockCard from "../components/dashboard/ResidualShockCard";
 import ModelPerformancePanel from "../components/dashboard/ModelPerformancePanel";
 import RiskExplanationCard from "../components/dashboard/RiskExplanationCard";
 import ModelComparisonTable from "../components/dashboard/ModelComparisonTable";
+import FeatureImportanceCard from "../components/dashboard/FeatureImportanceCard";
 
 const API_BASE = "https://omnisight-api.onrender.com/api";
 const DEBOUNCE_MS = 350;
@@ -351,6 +352,10 @@ function Dashboard() {
         />
         <ModelComparisonTable
           modelComparison={prediction?.model_comparison}
+          bestModel={prediction?.best_model}
+        />
+        <FeatureImportanceCard
+          featureImportance={prediction?.feature_importance}
           bestModel={prediction?.best_model}
         />
       </div>
