@@ -2,20 +2,21 @@ const express = require('express');
 const router = express.Router();
 const riskController = require('../controllers/riskController');
 
-
-// The ML Ticker Route (We built this earlier)
+// The ML Ticker Route
 router.post('/predict', riskController.generatePrediction);
 
-// THE NEW MANUAL ROUTE
+// Manual calculator
 router.post('/manual-predict', riskController.manualCalculation);
 
-// THE NEW SEARCH ROUTE
+// Search
 router.get('/search', riskController.searchTickers);
 
-// Add this under your other routes
+// Insight history
 router.get('/History', riskController.getRecentInsights);
+router.get('/History/all', riskController.getAllInsights);
 
-// Add this under your other routes
-router.get('/History/all', riskController.getAllInsights); // NEW: For the full page
+// NEW: Model experiment tracking
+router.get('/experiments', riskController.getExperiments);
+router.get('/experiments/:ticker', riskController.getExperimentsByTicker);
 
 module.exports = router;
