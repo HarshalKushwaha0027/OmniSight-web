@@ -12,7 +12,6 @@ from sklearn.metrics import (
     precision_score, recall_score, accuracy_score,
     roc_auc_score, f1_score
 )
-from sklearn.model_selection import train_test_split
 import shap
 import math
 
@@ -233,9 +232,46 @@ def generate_risk_prediction(data: PredictionData):
     X_ml = ml_df[FEATURE_NAMES]
     y_ml = ml_df["Target"]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_ml, y_ml, test_size=0.2, stratify=y_ml, random_state=42
-    )
+    # ── TIME-SERIES SPLIT (not random) ─────────────────────────────────────
+    # Financial data is sequential: a random shuffle lets the model "see"
+    # rows from after the test period during training, since neighbouring
+    # days share highly correlated volatility/beta/momentum values. This
+    # leaks information and inflates test metrics artificially.
+    #
+    # Instead we cut chronologically: the oldest 80% of rows train the
+    # model, the most recent 20% test it — exactly how the model will be
+    # used in production (predict on data it has never seen, all of which
+    # comes AFTER the training window).
+    split_idx = int(len(ml_df) * 0.8)
+
+    X_train = X_ml.iloc[:split_idx]
+    X_test  = X_ml.iloc[split_idx:]
+    y_train = y_ml.iloc[:split_idx]
+    y_test  = y_ml.iloc[split_idx:]
+
+    # Guard: if the test period happens to contain only one class (e.g. no
+    # high-risk days occurred in the last 20%), AUC/precision are undefined.
+    # Fall back to a slightly larger test window until both classes appear,
+    # or raise a clear error if the ticker's data simply doesn't have enough
+    # class diversity to evaluate properly.
+    min_test_fraction = 0.2
+    max_test_fraction = 0.4
+    step = 0.05
+
+    test_fraction = min_test_fraction
+    while y_test.nunique() < 2 and test_fraction <= max_test_fraction:
+        test_fraction += step
+        split_idx = int(len(ml_df) * (1 - test_fraction))
+        X_train = X_ml.iloc[:split_idx]
+        X_test  = X_ml.iloc[split_idx:]
+        y_train = y_ml.iloc[:split_idx]
+        y_test  = y_ml.iloc[split_idx:]
+
+    if y_test.nunique() < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough class diversity in recent data to evaluate this ticker reliably."
+        )
 
     # -------- 5. TRAIN ALL THREE MODELS --------
     models = {
@@ -346,6 +382,15 @@ def generate_risk_prediction(data: PredictionData):
             "metrics": best_entry,
         },
         "model_comparison": comparison,
+
+        # NEW: transparency about how models were validated
+        "validation": {
+            "method":        "chronological (time-series) split",
+            "train_rows":    len(X_train),
+            "test_rows":     len(X_test),
+            "train_period":  f"{ml_df.index[0].strftime('%Y-%m-%d')} to {ml_df.index[split_idx - 1].strftime('%Y-%m-%d')}",
+            "test_period":   f"{ml_df.index[split_idx].strftime('%Y-%m-%d')} to {ml_df.index[-1].strftime('%Y-%m-%d')}",
+        },
 
         # NEW: feature importance ranking for the selected model
         "feature_importance": feature_importance,
