@@ -15,6 +15,10 @@ function Sidebar({ onNavigate }) {
     { id: "performance",  label: "Model Performance" },
   ];
 
+  const bottomLinks = [
+    { to: "/experiments", label: "Model Experiments" },
+  ];
+
   return (
     <aside
       className="
@@ -51,6 +55,19 @@ function Sidebar({ onNavigate }) {
           </button>
         ))}
       </nav>
+
+      {/* External page links (not in-page sections) */}
+      <div className="border-t border-slate-800 pt-4 mt-4 flex flex-col gap-1">
+        {bottomLinks.map(({ to, label }) => (
+          <Link
+            key={to}
+            to={to}
+            className="text-left px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors duration-150"
+          >
+            {label}
+          </Link>
+        ))}
+      </div>
 
       {/* Bottom link back to home */}
       <Link

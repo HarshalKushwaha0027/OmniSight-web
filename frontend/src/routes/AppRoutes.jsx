@@ -1,5 +1,4 @@
- 
-import { Routes, Route } from "react-router-dom"; 
+import { Routes, Route } from "react-router-dom";
 import ScrollToTop from "../components/common/ScrollToTop";
 
 import Home from "../pages/Home";
@@ -8,11 +7,11 @@ import About from "../pages/About";
 import History from "../pages/History";
 import Contact from "../pages/Contact";
 import ComingSoon from "../pages/ComingSoon";
+import ModelExperiments from "../pages/ModelExperiments";
 
 function AppRoutes() {
   return (
- 
-    <> 
+    <>
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -20,6 +19,8 @@ function AppRoutes() {
         <Route path="/about" element={<About />} />
         <Route path="/History" element={<History />} />
         <Route path="/Contact" element={<Contact />} />
+        {/* NEW: Model Experiments page */}
+        <Route path="/experiments" element={<ModelExperiments />} />
         {/* Reusing the Coming Soon page for everything else! */}
         <Route path="/docs" element={<ComingSoon title="Documentation" />} />
         <Route path="/api-info" element={<ComingSoon title="API Reference" />} />
