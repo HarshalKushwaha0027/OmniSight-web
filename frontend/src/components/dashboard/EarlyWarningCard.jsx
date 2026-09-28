@@ -44,7 +44,12 @@ function EarlyWarningCard({ probability, status }) {
     }
   };
 
-  const safeStatus = status === "Loading..." ? "Low" : status;
+  let safeStatus = "Low";
+  if (probability > 65) {
+    safeStatus = "High";
+  } else if (probability > 35) {
+    safeStatus = "Moderate";
+  }
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 mt-10">

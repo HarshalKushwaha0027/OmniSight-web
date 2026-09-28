@@ -213,7 +213,11 @@ function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Risk Score</h2>
-              <p className="text-5xl font-bold text-[#00AB55] mt-6">{risk}</p>
+              <p className={`text-5xl font-bold mt-6 ${
+                category === "High" ? "text-red-400" : category === "Moderate" ? "text-yellow-400" : "text-[#00AB55]"
+              }`}>
+                {risk}
+              </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Confidence</h2>
@@ -221,7 +225,7 @@ function Dashboard() {
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Category</h2>
-              <p className={`text-5xl font-bold ${
+              <p className={`text-5xl font-bold mt-6 ${
                 category === "High" ? "text-red-400" : category === "Moderate" ? "text-yellow-400" : "text-green-400"
               }`}>
                 {category}{category !== "—" && " Risk"}
