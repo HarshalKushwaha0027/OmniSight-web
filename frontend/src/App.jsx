@@ -1,8 +1,12 @@
 import AppRoutes from "./routes/AppRoutes";
-import ScrollToTop from "./components/common/ScrollToTop";
-import History from "./pages/History";
+import { AuthProvider } from "./context/AuthContext";
+
 function App() {
-  return <AppRoutes />;
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
+  );
 }
 
 export default App;
