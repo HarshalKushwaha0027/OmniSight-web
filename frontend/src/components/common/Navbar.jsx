@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import logo from "../../assets/logo.png";
+import UserAccountDropdown from "./UserAccountDropdown";
 function Navbar() {
   return (
     <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50">
@@ -57,6 +58,10 @@ function Navbar() {
           >
             About
           </Link>
+
+          <div className="flex items-center gap-4">
+            <UserAccountDropdown />
+          </div>
 
         </div>
 
