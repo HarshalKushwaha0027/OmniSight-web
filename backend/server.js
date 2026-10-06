@@ -18,16 +18,20 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// ─── Simple in-memory cache ───────────────────────────────────────────────────
-// Stores the last ML result for each ticker so repeat searches are instant.
-// Cache entries expire after 10 minutes (the market data doesn't change faster).
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const predictionCache = new Map(); // Map<ticker, { data, expiresAt }>
- 
+// ─── Simple in-memory cache (predictions) ─────────────────────────────────────
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const predictionCache = new Map();
+app.set('predictionCache', predictionCache);
+app.set('CACHE_TTL_MS', CACHE_TTL_MS);
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 const riskRoutes = require('./routes/riskRoutes');
+const authRoutes = require('./routes/authRoutes');
+const watchlistRoutes = require('./routes/watchlistRoutes');
+
 app.use('/api', riskRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/watchlist', watchlistRoutes);
 
 app.get('/', (req, res) => {
   res.send('OmniSight Backend Server is running successfully!');
