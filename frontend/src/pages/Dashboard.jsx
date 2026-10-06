@@ -11,6 +11,8 @@ import ModelPerformancePanel from "../components/dashboard/ModelPerformancePanel
 import RiskExplanationCard from "../components/dashboard/RiskExplanationCard";
 import ModelComparisonTable from "../components/dashboard/ModelComparisonTable";
 import FeatureImportanceCard from "../components/dashboard/FeatureImportanceCard";
+import { Bookmark, BookmarkCheck } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 
 const API_BASE = "https://omnisight-api.onrender.com/api";
 const DEBOUNCE_MS = 350;
@@ -36,6 +38,10 @@ function SkeletonCard() {
 function Dashboard() {
   const [searchParams] = useSearchParams();
   const urlTicker = searchParams.get("ticker");
+  const { isAuthenticated, authHeader } = useAuth();
+
+  const [isWatchlisted, setIsWatchlisted] = useState(false);
+  const [isWatchlistBusy, setIsWatchlistBusy] = useState(false);
 
   const [recentInsights, setRecentInsights]   = useState([]);
   const [prediction, setPrediction]           = useState(null);
@@ -130,6 +136,49 @@ function Dashboard() {
     if (e.key === "Enter") { e.preventDefault(); executeSearch(searchQuery); }
   };
 
+  // ── Watchlist: check whether the current ticker is already saved ──────────
+  useEffect(() => {
+    if (!isAuthenticated || !searchQuery) {
+      setIsWatchlisted(false);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(`${API_BASE}/watchlist`, { headers: authHeader(), signal: controller.signal })
+      .then((r) => r.json())
+      .then((items) => {
+        setIsWatchlisted(items.some((item) => item.ticker === searchQuery.toUpperCase()));
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [searchQuery, isAuthenticated, authHeader]);
+
+  const handleToggleWatchlist = async () => {
+    if (!isAuthenticated || !searchQuery || isWatchlistBusy) return;
+    setIsWatchlistBusy(true);
+    const ticker = searchQuery.toUpperCase();
+
+    try {
+      if (isWatchlisted) {
+        await fetch(`${API_BASE}/watchlist/${ticker}`, {
+          method: "DELETE",
+          headers: authHeader(),
+        });
+        setIsWatchlisted(false);
+      } else {
+        await fetch(`${API_BASE}/watchlist`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeader() },
+          body: JSON.stringify({ ticker, name: ticker }),
+        });
+        setIsWatchlisted(true);
+      }
+    } catch (error) {
+      console.error("Watchlist toggle failed:", error);
+    } finally {
+      setIsWatchlistBusy(false);
+    }
+  };
+
   const handleManualCalculation = async (e) => {
     e.preventDefault();
     try {
@@ -164,6 +213,21 @@ function Dashboard() {
       <div className="fixed top-9 right-10 z-50 bg-slate-900/80 backdrop-blur-md border border-[#00AB55]/30 text-white px-5 py-2 rounded-full shadow-[0_0_15px_rgba(0,171,85,0.1)] flex items-center gap-3">
         <span className="w-2 h-2 rounded-full bg-[#00AB55] animate-pulse" />
         <span className="font-bold tracking-wider uppercase text-sm">{searchQuery || "MARKET"}</span>
+
+        {isAuthenticated && searchQuery && (
+          <button
+            onClick={handleToggleWatchlist}
+            disabled={isWatchlistBusy}
+            title={isWatchlisted ? "Remove from watchlist" : "Add to watchlist"}
+            className={`ml-1 p-1 rounded-full transition disabled:opacity-50 ${
+              isWatchlisted
+                ? "text-[#00AB55] hover:text-white"
+                : "text-slate-400 hover:text-[#00AB55]"
+            }`}
+          >
+            {isWatchlisted ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+          </button>
+        )}
       </div>
 
       {/* ── Overview ── */}
@@ -213,11 +277,7 @@ function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Risk Score</h2>
-              <p className={`text-5xl font-bold mt-6 ${
-                category === "High" ? "text-red-400" : category === "Moderate" ? "text-yellow-400" : "text-[#00AB55]"
-              }`}>
-                {risk}
-              </p>
+              <p className="text-5xl font-bold text-[#00AB55] mt-6">{risk}</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Confidence</h2>
@@ -225,7 +285,7 @@ function Dashboard() {
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Category</h2>
-              <p className={`text-5xl font-bold mt-6 ${
+              <p className={`text-5xl font-bold ${
                 category === "High" ? "text-red-400" : category === "Moderate" ? "text-yellow-400" : "text-green-400"
               }`}>
                 {category}{category !== "—" && " Risk"}
