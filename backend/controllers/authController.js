@@ -1,6 +1,9 @@
 const User = require('../models/User');
 const Watchlist = require('../models/Watchlist');
 const jwt = require('jsonwebtoken');
+const { generateOtp, sendOtpEmail } = require('../utils/sendEmail');
+
+const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 function signToken(user) {
     return jwt.sign(
@@ -16,12 +19,15 @@ function sanitizeUser(user) {
         userId: user.userId,
         name: user.name,
         email: user.email,
+        isVerified: user.isVerified,
         preferences: user.preferences,
         createdAt: user.createdAt,
     };
 }
 
 // ─── POST /api/auth/register ───────────────────────────────────────────────
+// Creates an UNVERIFIED account and emails a 6-digit OTP.
+// Does NOT return a token yet — the frontend must call /verify-otp first.
 exports.register = async (req, res) => {
     const { name, email, password } = req.body;
 
@@ -34,17 +40,93 @@ exports.register = async (req, res) => {
 
     try {
         const existing = await User.findOne({ email: email.toLowerCase() });
-        if (existing) {
+        if (existing && existing.isVerified) {
             return res.status(409).json({ error: 'An account with this email already exists.' });
         }
 
-        const user = await User.create({ name, email, password });
-        const token = signToken(user);
+        const otp = generateOtp();
+        const otpExpires = new Date(Date.now() + OTP_TTL_MS);
 
-        return res.status(201).json({ token, user: sanitizeUser(user) });
+        let user;
+        if (existing && !existing.isVerified) {
+            // Re-registering before verifying — update details and resend OTP
+            existing.name = name;
+            existing.password = password;   // pre-save hook re-hashes it
+            existing.otp = otp;
+            existing.otpExpires = otpExpires;
+            user = await existing.save();
+        } else {
+            user = await User.create({ name, email, password, otp, otpExpires });
+        }
+
+        await sendOtpEmail(user.email, otp, user.name);
+
+        return res.status(201).json({
+            message: 'Verification code sent to your email.',
+            email: user.email,
+        });
     } catch (error) {
         console.error('Register error:', error.message);
         return res.status(500).json({ error: 'Could not create account.' });
+    }
+};
+
+// ─── POST /api/auth/verify-otp ──────────────────────────────────────────────
+// Body: { email, otp } → marks the account verified and logs them in.
+exports.verifyOtp = async (req, res) => {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+        return res.status(400).json({ error: 'Email and code are required.' });
+    }
+
+    try {
+        const user = await User.findOne({ email: email.toLowerCase() }).select('+otp +otpExpires');
+        if (!user) {
+            return res.status(404).json({ error: 'No account found for this email.' });
+        }
+        if (user.isVerified) {
+            return res.status(400).json({ error: 'This account is already verified.' });
+        }
+        if (!user.otp || user.otp !== otp) {
+            return res.status(400).json({ error: 'Incorrect verification code.' });
+        }
+        if (user.otpExpires < new Date()) {
+            return res.status(400).json({ error: 'This code has expired. Request a new one.' });
+        }
+
+        user.isVerified = true;
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        await user.save();
+
+        const token = signToken(user);
+        return res.status(200).json({ token, user: sanitizeUser(user) });
+    } catch (error) {
+        console.error('Verify OTP error:', error.message);
+        return res.status(500).json({ error: 'Could not verify code.' });
+    }
+};
+
+// ─── POST /api/auth/resend-otp ──────────────────────────────────────────────
+exports.resendOtp = async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+    try {
+        const user = await User.findOne({ email: email.toLowerCase() });
+        if (!user) return res.status(404).json({ error: 'No account found for this email.' });
+        if (user.isVerified) return res.status(400).json({ error: 'This account is already verified.' });
+
+        const otp = generateOtp();
+        user.otp = otp;
+        user.otpExpires = new Date(Date.now() + OTP_TTL_MS);
+        await user.save();
+
+        await sendOtpEmail(user.email, otp, user.name);
+        return res.status(200).json({ message: 'A new code has been sent.' });
+    } catch (error) {
+        console.error('Resend OTP error:', error.message);
+        return res.status(500).json({ error: 'Could not resend code.' });
     }
 };
 
@@ -57,7 +139,6 @@ exports.login = async (req, res) => {
     }
 
     try {
-        // .select('+password') because the schema hides it by default
         const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
         if (!user) {
             return res.status(401).json({ error: 'Invalid email or password.' });
@@ -66,6 +147,21 @@ exports.login = async (req, res) => {
         const isMatch = await user.comparePassword(password);
         if (!isMatch) {
             return res.status(401).json({ error: 'Invalid email or password.' });
+        }
+
+        if (!user.isVerified) {
+            // Help the user along — resend a code automatically
+            const otp = generateOtp();
+            user.otp = otp;
+            user.otpExpires = new Date(Date.now() + OTP_TTL_MS);
+            await user.save();
+            await sendOtpEmail(user.email, otp, user.name);
+
+            return res.status(403).json({
+                error: 'Please verify your email first. A new code has been sent.',
+                needsVerification: true,
+                email: user.email,
+            });
         }
 
         const token = signToken(user);
@@ -77,7 +173,6 @@ exports.login = async (req, res) => {
 };
 
 // ─── GET /api/auth/me ───────────────────────────────────────────────────────
-// Protected — returns the current logged-in user (req.user set by middleware)
 exports.getMe = async (req, res) => {
     return res.status(200).json({ user: sanitizeUser(req.user) });
 };
@@ -101,7 +196,7 @@ exports.updatePassword = async (req, res) => {
             return res.status(401).json({ error: 'Current password is incorrect.' });
         }
 
-        user.password = newPassword;   // pre-save hook re-hashes it
+        user.password = newPassword;
         await user.save();
 
         return res.status(200).json({ message: 'Password updated successfully.' });
@@ -112,7 +207,6 @@ exports.updatePassword = async (req, res) => {
 };
 
 // ─── PUT /api/auth/preferences ───────────────────────────────────────────────
-// Powers the Settings page
 exports.updatePreferences = async (req, res) => {
     const allowedKeys = ['theme', 'defaultTicker', 'riskAlertThreshold', 'emailNotifications', 'defaultModel'];
     const updates = {};
@@ -141,7 +235,6 @@ exports.updatePreferences = async (req, res) => {
 };
 
 // ─── PUT /api/auth/profile ───────────────────────────────────────────────────
-// Update name (email changes are usually a bigger flow — kept simple here)
 exports.updateProfile = async (req, res) => {
     const { name } = req.body;
     if (!name || !name.trim()) {
@@ -162,8 +255,6 @@ exports.updateProfile = async (req, res) => {
 };
 
 // ─── DELETE /api/auth/account ────────────────────────────────────────────────
-// Requires the user to type their userId as confirmation (checked client-side
-// too, but we also verify server-side to be safe)
 exports.deleteAccount = async (req, res) => {
     const { confirmUserId } = req.body;
 
