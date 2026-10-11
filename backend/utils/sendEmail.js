@@ -1,23 +1,27 @@
-const nodemailer = require('nodemailer');
+const axios = require('axios');
+const crypto = require('crypto');
 
-// Uses Gmail SMTP with an App Password (NOT your regular Gmail password).
-// Setup: Google Account → Security → 2-Step Verification → App Passwords
-// → generate one for "Mail" and put it in EMAIL_APP_PASSWORD below.
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_APP_PASSWORD,
-    },
-});
+// Render's free tier blocks outbound SMTP (ports 25/465/587), so nodemailer +
+// Gmail times out in production. This sends through Brevo's HTTPS API instead,
+// which works on any host.
+//
+// Required env vars (local .env AND Render):
+//   BREVO_API_KEY   - Brevo → SMTP & API → API Keys
+//   EMAIL_FROM      - a sender address you've verified in Brevo → Senders
+// Optional:
+//   EMAIL_FROM_NAME - defaults to "OmniSight"
 
 function generateOtp() {
-    // 6-digit numeric code, e.g. "042817"
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    // crypto.randomInt is cryptographically secure (Math.random is not)
+    return crypto.randomInt(100000, 1000000).toString();
 }
 
 async function sendOtpEmail(to, otp, name) {
-    const html = `
+    if (!process.env.BREVO_API_KEY || !process.env.EMAIL_FROM) {
+        throw new Error('Email is not configured: set BREVO_API_KEY and EMAIL_FROM.');
+    }
+
+    const htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #0a0e14; color: #e2e8f0;">
             <h2 style="color: #00AB55; margin-bottom: 8px;">OmniSight</h2>
             <p style="color: #94a3b8; margin-bottom: 24px;">Hi ${name}, verify your email to finish creating your account.</p>
@@ -29,12 +33,26 @@ async function sendOtpEmail(to, otp, name) {
         </div>
     `;
 
-    await transporter.sendMail({
-        from: `"OmniSight" <${process.env.EMAIL_USER}>`,
-        to,
-        subject: `${otp} is your OmniSight verification code`,
-        html,
-    });
+    await axios.post(
+        'https://api.brevo.com/v3/smtp/email',
+        {
+            sender: {
+                name: process.env.EMAIL_FROM_NAME || 'OmniSight',
+                email: process.env.EMAIL_FROM,
+            },
+            to: [{ email: to, name }],
+            subject: `${otp} is your OmniSight verification code`,
+            htmlContent,
+        },
+        {
+            headers: {
+                'api-key': process.env.BREVO_API_KEY,
+                'Content-Type': 'application/json',
+                accept: 'application/json',
+            },
+            timeout: 10000, // fail fast (10s) instead of hanging for over a minute
+        }
+    );
 }
 
 module.exports = { generateOtp, sendOtpEmail };

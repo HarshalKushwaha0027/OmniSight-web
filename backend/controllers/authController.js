@@ -59,7 +59,16 @@ exports.register = async (req, res) => {
             user = await User.create({ name, email, password, otp, otpExpires });
         }
 
-        await sendOtpEmail(user.email, otp, user.name);
+        try {
+            await sendOtpEmail(user.email, otp, user.name);
+        } catch (mailError) {
+            console.error('OTP email failed:', mailError.response?.data || mailError.message);
+            // The unverified account exists, so retrying "Create Account" with the
+            // same email just regenerates the code and tries to send again.
+            return res.status(502).json({
+                error: "We couldn't send the verification email right now. Please try again in a moment.",
+            });
+        }
 
         return res.status(201).json({
             message: 'Verification code sent to your email.',
@@ -155,7 +164,10 @@ exports.login = async (req, res) => {
             user.otp = otp;
             user.otpExpires = new Date(Date.now() + OTP_TTL_MS);
             await user.save();
-            await sendOtpEmail(user.email, otp, user.name);
+            // Fire-and-forget: a mail failure shouldn't turn a login attempt into a 500
+            sendOtpEmail(user.email, otp, user.name).catch((e) =>
+                console.error('OTP email failed:', e.response?.data || e.message)
+            );
 
             return res.status(403).json({
                 error: 'Please verify your email first. A new code has been sent.',
