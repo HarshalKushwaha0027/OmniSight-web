@@ -31,8 +31,12 @@ exports.generatePrediction = async (req, res) => {
         const pythonResponse = await axios.post(`${ML_ENGINE_URL}/predict`, { ticker: key });
         const data = pythonResponse.data;
 
-        // 3. Save the risk insight (non-blocking)
+        // 3. Save the risk insight (non-blocking).
+        // req.user is only set if the request carried a valid token
+        // (optionalAuth middleware) — guests still get a prediction, their
+        // search just never shows up in anyone's "Recent Risk Insights".
         Insight.create({
+            userId: req.user ? req.user._id : null,
             ticker: key,
             riskScore: data.risk || 0,
             confidence: data.confidence || 0,
@@ -119,10 +123,13 @@ exports.searchTickers = async (req, res) => {
     }
 };
 
-// ─── Recent Insights (last 5) ─────────────────────────────────────────────────
+// ─── Recent Insights (last 5) — SCOPED TO THE LOGGED-IN USER ──────────────────
+// Requires auth: this is personal history, not a global feed.
 exports.getRecentInsights = async (req, res) => {
     try {
-        const insights = await Insight.find().sort({ createdAt: -1 }).limit(5);
+        const insights = await Insight.find({ userId: req.user._id })
+            .sort({ createdAt: -1 })
+            .limit(5);
         res.status(200).json(insights);
     } catch (error) {
         console.error("Failed to fetch history:", error);
@@ -130,10 +137,12 @@ exports.getRecentInsights = async (req, res) => {
     }
 };
 
-// ─── Full History (up to 100) ─────────────────────────────────────────────────
+// ─── Full History (up to 100) — SCOPED TO THE LOGGED-IN USER ──────────────────
 exports.getAllInsights = async (req, res) => {
     try {
-        const insights = await Insight.find().sort({ createdAt: -1 }).limit(100);
+        const insights = await Insight.find({ userId: req.user._id })
+            .sort({ createdAt: -1 })
+            .limit(100);
         res.status(200).json(insights);
     } catch (error) {
         console.error("Failed to fetch full history:", error);

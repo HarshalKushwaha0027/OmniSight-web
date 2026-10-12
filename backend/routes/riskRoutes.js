@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const riskController = require('../controllers/riskController');
+const { requireAuth, optionalAuth } = require('../middleware/authMiddleware');
 
 // The ML Ticker Route
 router.post('/predict', riskController.generatePrediction);
@@ -12,11 +13,11 @@ router.post('/manual-predict', riskController.manualCalculation);
 router.get('/search', riskController.searchTickers);
 
 // Insight history
-router.get('/History', riskController.getRecentInsights);
-router.get('/History/all', riskController.getAllInsights);
+router.get('/History', requireAuth, riskController.getRecentInsights);
+router.get('/History/all', requireAuth, riskController.getAllInsights);
 
 // NEW: Model experiment tracking
-router.get('/experiments', riskController.getExperiments);
-router.get('/experiments/:ticker', riskController.getExperimentsByTicker);
+router.get('/experiments', requireAuth, riskController.getExperiments);
+router.get('/experiments/:ticker', requireAuth, riskController.getExperimentsByTicker);
 
 module.exports = router;

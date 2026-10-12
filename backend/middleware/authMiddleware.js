@@ -26,3 +26,26 @@ exports.requireAuth = async (req, res, next) => {
         return res.status(401).json({ error: 'Invalid or expired token. Please log in again.' });
     }
 };
+
+// Like requireAuth, but never blocks the request. If a valid token is
+// present, req.user is set; otherwise req.user stays undefined and the
+// request continues as a guest. Used on routes that work for everyone
+// (like /predict) but should personalize their result when logged in.
+exports.optionalAuth = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return next();
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await User.findById(decoded.id);
+        if (user) req.user = user;
+    } catch (error) {
+        // Invalid/expired token on an optional route — just proceed as a guest
+    }
+
+    next();
+};

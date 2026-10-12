@@ -1,27 +1,33 @@
 const mongoose = require('mongoose');
-const cors = require('cors'); 
-const insightSchema = new mongoose.Schema({
-  // Note: Once you build a login system, you would add a userId field here!
-  ticker: { 
-    type: String, 
-    required: true 
-  },
-  riskScore: { 
-    type: Number, 
-    required: true 
-  },
-  confidence: { 
-    type: Number, 
-    required: true 
-  },
-  category: { 
-    type: String, 
-    required: true 
-  },
-  createdAt: { 
-    type: Date, 
-    default: Date.now()
-  }
-});
 
-module.exports = mongoose.model('Insight', insightSchema);
+const InsightSchema = new mongoose.Schema({
+    // Optional: a logged-out guest search still gets saved (userId stays null),
+    // but it will never show up in anyone's personal "Recent Risk Insights".
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+        index: true,
+    },
+    ticker: {
+        type: String,
+        required: true,
+        uppercase: true,
+    },
+    riskScore: {
+        type: Number,
+        required: true,
+    },
+    confidence: {
+        type: Number,
+        required: true,
+    },
+    category: {
+        type: String,
+        required: true,
+    },
+}, { timestamps: true });
+
+InsightSchema.index({ userId: 1, createdAt: -1 });
+
+module.exports = mongoose.model('Insight', InsightSchema);
