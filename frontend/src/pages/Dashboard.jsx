@@ -11,7 +11,7 @@ import ModelPerformancePanel from "../components/dashboard/ModelPerformancePanel
 import RiskExplanationCard from "../components/dashboard/RiskExplanationCard";
 import ModelComparisonTable from "../components/dashboard/ModelComparisonTable";
 import FeatureImportanceCard from "../components/dashboard/FeatureImportanceCard";
-import { Bookmark, BookmarkCheck } from "lucide-react";
+import { Bookmark, BookmarkCheck, ExternalLink } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 const API_BASE = "https://omnisight-api.onrender.com/api";
@@ -66,15 +66,20 @@ function Dashboard() {
 
   // ── FIX 1: fetchHistory defined BEFORE executeSearch so it's in scope ──────
   const fetchHistory = useCallback(async () => {
+    // History is now per-user — skip the call entirely for guests instead
+    // of hitting a 401 every time.
+    if (!isAuthenticated) {
+      setRecentInsights([]);
+      return;
+    }
     try {
-      // FIX 2: capital H to match your route definition /api/History
-      const response = await fetch(`${API_BASE}/History`);
+      const response = await fetch(`${API_BASE}/History`, { headers: authHeader() });
       const data = await response.json();
       if (response.ok) setRecentInsights(data);
     } catch (error) {
       console.error("Failed to load history:", error);
     }
-  }, []);
+  }, [isAuthenticated, authHeader]);
 
   const executeSearch = useCallback(async (tickerToSearch) => {
     if (!tickerToSearch.trim()) return;
@@ -343,11 +348,18 @@ function Dashboard() {
                 <th className="pb-4">Risk Score</th>
                 <th className="pb-4">Confidence</th>
                 <th className="pb-4">Status</th>
+                <th className="pb-4 text-right">Action</th>
               </tr>
             </thead>
             <tbody>
-              {recentInsights.length === 0 ? (
-                <tr><td colSpan="4" className="text-center py-6 text-slate-500">No recent insights found.</td></tr>
+              {!isAuthenticated ? (
+                <tr>
+                  <td colSpan="5" className="text-center py-6 text-slate-500">
+                    <Link to="/login" className="text-[#00AB55] hover:underline">Log in</Link> to see your personal search history.
+                  </td>
+                </tr>
+              ) : recentInsights.length === 0 ? (
+                <tr><td colSpan="5" className="text-center py-6 text-slate-500">No recent insights found.</td></tr>
               ) : (
                 recentInsights.map((item, index) => (
                   <tr key={item._id || index} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
@@ -362,6 +374,15 @@ function Dashboard() {
                           ? "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
                           : "bg-green-500/10 text-green-400 border border-green-500/20"
                       }`}>{item.category} Risk</span>
+                    </td>
+                    <td className="py-4 text-right">
+                      <button
+                        onClick={() => executeSearch(item.ticker)}
+                        title="Analyze in Dashboard"
+                        className="inline-flex p-2 text-slate-400 hover:text-[#00AB55] hover:bg-[#00AB55]/10 rounded-lg transition"
+                      >
+                        <ExternalLink size={18} />
+                      </button>
                     </td>
                   </tr>
                 ))
