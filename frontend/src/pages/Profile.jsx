@@ -6,7 +6,7 @@ import {
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../context/AuthContext";
 
-const API_BASE = "https://omnisight-api.onrender.com";
+const API_BASE = "https://omnisight-api.onrender.com/api";
 
 function Profile() {
   const { user, authHeader, logout, refreshUser } = useAuth();
