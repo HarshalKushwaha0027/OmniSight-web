@@ -26,6 +26,7 @@ function History() {
         // (was lowercase /history/all, which 404s on Render's case-sensitive routing)
         const response = await fetch(`${API_BASE}/History/all`, {
           headers: authHeader(),
+          cache: "no-store", // prevent the browser from reusing a stale cached response
         });
         const data = await response.json();
         if (response.ok) {

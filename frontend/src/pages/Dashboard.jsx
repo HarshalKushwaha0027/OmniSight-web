@@ -73,7 +73,10 @@ function Dashboard() {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE}/History`, { headers: authHeader() });
+      const response = await fetch(`${API_BASE}/History`, {
+        headers: authHeader(),
+        cache: "no-store", // prevent the browser from reusing a stale cached response
+      });
       const data = await response.json();
       if (response.ok) setRecentInsights(data);
     } catch (error) {
