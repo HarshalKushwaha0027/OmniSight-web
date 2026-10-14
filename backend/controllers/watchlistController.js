@@ -4,6 +4,7 @@ const Watchlist = require('../models/Watchlist');
 exports.getWatchlist = async (req, res) => {
     try {
         const items = await Watchlist.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
         return res.status(200).json(items);
     } catch (error) {
         console.error('Get watchlist error:', error.message);

@@ -130,6 +130,8 @@ exports.getRecentInsights = async (req, res) => {
         const insights = await Insight.find({ userId: req.user._id })
             .sort({ createdAt: -1 })
             .limit(5);
+        // Personal, frequently-changing data — never let the browser cache this.
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
         res.status(200).json(insights);
     } catch (error) {
         console.error("Failed to fetch history:", error);
@@ -143,6 +145,7 @@ exports.getAllInsights = async (req, res) => {
         const insights = await Insight.find({ userId: req.user._id })
             .sort({ createdAt: -1 })
             .limit(100);
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
         res.status(200).json(insights);
     } catch (error) {
         console.error("Failed to fetch full history:", error);
