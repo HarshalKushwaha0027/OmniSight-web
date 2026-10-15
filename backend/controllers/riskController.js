@@ -18,10 +18,25 @@ exports.generatePrediction = async (req, res) => {
 
     const key = ticker.toUpperCase();
 
-    // 1. Check cache first
+    // 1. Check cache first.
+    // IMPORTANT: a cache hit skips the slow ML call, but we must still log
+    // this as an Insight for the logged-in user — otherwise repeat searches
+    // of the same ticker within the 10-min window never show up in their
+    // Recent Risk Insights / History, even though a real search happened.
     const cached = predictionCache.get(key);
     if (cached && Date.now() < cached.expiresAt) {
         console.log(`[cache HIT] ${key} — returning cached result`);
+
+        Insight.create({
+            userId: req.user ? req.user._id : null,
+            ticker: key,
+            riskScore: cached.data.risk || 0,
+            confidence: cached.data.confidence || 0,
+            category: cached.data.category || "Unknown"
+        }).catch(dbError => {
+            console.error("Database Error - Could not save insight (cache hit):", dbError.message);
+        });
+
         return res.status(200).json(cached.data);
     }
 
