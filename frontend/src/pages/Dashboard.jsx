@@ -92,7 +92,7 @@ function Dashboard() {
     try {
       const response = await fetch(`${API_BASE}/predict`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader() },
         body: JSON.stringify({ ticker: tickerToSearch.toUpperCase() }),
       });
       const data = await response.json();
