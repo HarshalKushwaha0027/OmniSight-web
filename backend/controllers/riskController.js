@@ -115,15 +115,73 @@ exports.manualCalculation = async (req, res) => {
     }
 };
 
+// ─── Static fallback list ──────────────────────────────────────────────────────
+// A small curated list of commonly searched tickers. Used when Yahoo Finance
+// is slow, rate-limiting, or outright blocking this request (common on cloud
+// hosting IPs — Yahoo's search endpoint is unofficial and treats datacenter
+// traffic differently from residential traffic). This guarantees the search
+// bar NEVER goes completely dead, even if the external API is down.
+const POPULAR_TICKERS = [
+    { ticker: "AAPL",  name: "Apple Inc." },
+    { ticker: "MSFT",  name: "Microsoft Corporation" },
+    { ticker: "GOOGL", name: "Alphabet Inc." },
+    { ticker: "AMZN",  name: "Amazon.com, Inc." },
+    { ticker: "TSLA",  name: "Tesla, Inc." },
+    { ticker: "NVDA",  name: "NVIDIA Corporation" },
+    { ticker: "META",  name: "Meta Platforms, Inc." },
+    { ticker: "NFLX",  name: "Netflix, Inc." },
+    { ticker: "AMD",   name: "Advanced Micro Devices, Inc." },
+    { ticker: "INTC",  name: "Intel Corporation" },
+    { ticker: "JPM",   name: "JPMorgan Chase & Co." },
+    { ticker: "V",     name: "Visa Inc." },
+    { ticker: "DIS",   name: "The Walt Disney Company" },
+    { ticker: "BA",    name: "The Boeing Company" },
+    { ticker: "KO",    name: "The Coca-Cola Company" },
+    { ticker: "MS",    name: "Morgan Stanley" },
+    { ticker: "BTC-USD", name: "Bitcoin USD" },
+    { ticker: "ETH-USD", name: "Ethereum USD" },
+];
+
+function searchStaticFallback(query) {
+    const q = query.toLowerCase();
+    return POPULAR_TICKERS.filter(
+        (t) => t.ticker.toLowerCase().includes(q) || t.name.toLowerCase().includes(q)
+    ).slice(0, 5);
+}
+
+// ─── Search result cache ────────────────────────────────────────────────────
+// Short TTL — autocomplete results don't need to be fresh-to-the-second,
+// and this dramatically cuts how often Yahoo is hit for popular prefixes
+// (every keystroke of "AAPL" would otherwise be 4 separate external calls).
+const searchCache = new Map();
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 // ─── Live Autocomplete Search ──────────────────────────────────────────────────
 exports.searchTickers = async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
 
+    const cacheKey = query.toLowerCase();
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+        return res.status(200).json(cached.data);
+    }
+
     try {
         const response = await axios.get(
-            `https://query2.finance.yahoo.com/v1/finance/search?q=${query}&quotesCount=5&newsCount=0`
+            `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=5&newsCount=0`,
+            {
+                timeout: 4000, // fail fast — don't make the user wait more than 4s for autocomplete
+                headers: {
+                    // A browser-like User-Agent reduces (does not eliminate) the chance
+                    // Yahoo's endpoint flags this as bot/scraper traffic.
+                    "User-Agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                    Accept: "application/json",
+                },
+            }
         );
+
         const quotes = response.data.quotes || [];
         const suggestions = quotes
             .filter(q => q.quoteType === 'EQUITY' || q.quoteType === 'CRYPTOCURRENCY' || q.quoteType === 'ETF')
@@ -131,10 +189,20 @@ exports.searchTickers = async (req, res) => {
                 ticker: q.symbol,
                 name: q.shortname || q.longname || q.symbol
             }));
+
+        // Cache even an empty result — prevents hammering Yahoo for a query
+        // that's known to return nothing useful.
+        searchCache.set(cacheKey, { data: suggestions, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
+
         res.status(200).json(suggestions);
+
     } catch (error) {
         console.error("Search API Error:", error.message);
-        res.status(500).json({ error: "Failed to fetch suggestions." });
+        // Yahoo failed/timed out/rate-limited — fall back to the static list
+        // instead of returning an error. The search bar stays usable for
+        // well-known tickers even when the external API is unreliable.
+        const fallback = searchStaticFallback(query);
+        res.status(200).json(fallback);
     }
 };
 
