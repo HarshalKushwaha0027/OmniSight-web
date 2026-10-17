@@ -13,6 +13,7 @@ import ModelComparisonTable from "../components/dashboard/ModelComparisonTable";
 import FeatureImportanceCard from "../components/dashboard/FeatureImportanceCard";
 import { Bookmark, BookmarkCheck, ExternalLink } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 
 const API_BASE = "https://omnisight-api.onrender.com/api";
 const DEBOUNCE_MS = 350;
@@ -39,6 +40,7 @@ function Dashboard() {
   const [searchParams] = useSearchParams();
   const urlTicker = searchParams.get("ticker");
   const { isAuthenticated, authHeader } = useAuth();
+  const { showToast } = useToast();
 
   const [isWatchlisted, setIsWatchlisted] = useState(false);
   const [isWatchlistBusy, setIsWatchlistBusy] = useState(false);
@@ -96,14 +98,20 @@ function Dashboard() {
         body: JSON.stringify({ ticker: tickerToSearch.toUpperCase() }),
       });
       const data = await response.json();
-      if (response.ok) setPrediction(data);
+      if (response.ok) {
+        setPrediction(data);
+      } else {
+        // Previously silent — the user saw nothing at all on a failed prediction.
+        showToast(data.error || "Couldn't generate a prediction for this ticker. Please try again.", "error");
+      }
     } catch (error) {
       console.error("Network Error:", error);
+      showToast("Couldn't reach the server. Check your connection and try again.", "error");
     } finally {
       setIsLoading(false);
       fetchHistory(); // now correctly in scope
     }
-  }, [fetchHistory]); // FIX 1: fetchHistory listed as dependency
+  }, [fetchHistory, showToast]);
 
   // Autocomplete suggestions
   useEffect(() => {
@@ -182,6 +190,7 @@ function Dashboard() {
       }
     } catch (error) {
       console.error("Watchlist toggle failed:", error);
+      showToast("Couldn't update your watchlist. Please try again.", "error");
     } finally {
       setIsWatchlistBusy(false);
     }
