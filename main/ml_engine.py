@@ -14,6 +14,7 @@ from sklearn.metrics import (
 )
 import shap
 import math
+import time
 
 app = FastAPI()
 
@@ -146,10 +147,43 @@ def generate_risk_prediction(data: PredictionData):
 
     # -------- 1. FETCH DATA --------
     try:
-        df        = yf.download([asset, market], start="2019-01-01", progress=False)["Close"]
-        returns   = df.pct_change().dropna()
+        # One retry with a short delay — Yahoo's rate limit is often transient
+        # (a burst, not a sustained block), so a 2s pause frequently succeeds.
+        df = None
+        for attempt in range(2):
+            try:
+                df = yf.download([asset, market], start="2019-01-01", progress=False)["Close"]
+                if not df.empty:
+                    break
+            except Exception as fetch_err:
+                print(f"yfinance attempt {attempt + 1} failed for {asset}: {fetch_err}")
+            if attempt == 0:
+                time.sleep(2)
+
+        # yfinance can be rate-limited by Yahoo (common on cloud hosting IPs)
+        # and in that case silently returns an EMPTY or partial DataFrame
+        # instead of raising — which then crashes RollingOLS downstream with
+        # a confusing, unrelated-looking numpy error. Catch it here instead,
+        # with a clear message the frontend can show the user.
+        if df is None or df.empty or asset not in df.columns or market not in df.columns:
+            raise HTTPException(
+                status_code=503,
+                detail="Market data is temporarily unavailable (rate limited). Please try again in a minute."
+            )
+
+        returns   = df.pct_change(fill_method=None).dropna()
         pair_data = returns[[asset, market]]
-    except Exception:
+
+        if len(pair_data) < 100:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough historical data for '{asset}' to generate a reliable prediction."
+            )
+
+    except HTTPException:
+        raise  # re-raise our own clean errors as-is
+    except Exception as e:
+        print(f"Data fetch error for {asset}: {e}")
         raise HTTPException(status_code=400, detail="Ticker not found or network error.")
 
     asset_returns  = pair_data[asset]
