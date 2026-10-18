@@ -100,7 +100,25 @@ exports.generatePrediction = async (req, res) => {
         return res.status(200).json(data);
 
     } catch (error) {
-        console.error("Error talking to Python:", error.message);
+        // axios wraps a non-2xx response as an error, but the REAL reason
+        // FastAPI rejected the request (the `detail` field) was sitting in
+        // error.response.data this whole time — error.message alone just
+        // says "Request failed with status code 400/500/503" and hides it.
+        const upstreamStatus = error.response?.status;
+        const upstreamDetail = error.response?.data?.detail;
+
+        console.error(
+            "Error talking to Python:",
+            upstreamStatus ? `[${upstreamStatus}] ${upstreamDetail || error.message}` : error.message
+        );
+
+        // Pass through the ML engine's own status code and message when we
+        // have one (400 = bad ticker/not enough data, 503 = rate limited),
+        // instead of flattening everything into an opaque 500.
+        if (upstreamStatus && upstreamDetail) {
+            return res.status(upstreamStatus).json({ error: upstreamDetail });
+        }
+
         return res.status(500).json({ error: "ML Engine is currently unavailable." });
     }
 };
