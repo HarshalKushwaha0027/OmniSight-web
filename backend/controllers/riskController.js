@@ -9,14 +9,21 @@ const predictionCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // ─── Generate Prediction (with cache + experiment logging) ───────────────────
+const VALID_MODELS = ["Logistic Regression", "Random Forest", "Gradient Boosting"];
+
 exports.generatePrediction = async (req, res) => {
-    const { ticker } = req.body;
+    const { ticker, preferredModel } = req.body;
 
     if (!ticker) {
         return res.status(400).json({ error: "Please provide a stock ticker symbol." });
     }
 
-    const key = ticker.toUpperCase();
+    const normalizedModel = VALID_MODELS.includes(preferredModel) ? preferredModel : null;
+
+    // Cache key MUST include the model choice — "AAPL" with Auto selection
+    // and "AAPL" with Random Forest forced are different predictions.
+    const key = `${ticker.toUpperCase()}::${normalizedModel || "Auto"}`;
+    const tickerOnly = ticker.toUpperCase();
 
     // 1. Check cache first.
     // IMPORTANT: a cache hit skips the slow ML call, but we must still log
@@ -29,7 +36,7 @@ exports.generatePrediction = async (req, res) => {
 
         Insight.create({
             userId: req.user ? req.user._id : null,
-            ticker: key,
+            ticker: tickerOnly,
             riskScore: cached.data.risk || 0,
             confidence: cached.data.confidence || 0,
             category: cached.data.category || "Unknown"
@@ -43,7 +50,10 @@ exports.generatePrediction = async (req, res) => {
     // 2. Cache miss — call the Python ML engine
     try {
         console.log(`[cache MISS] ${key} — calling ML engine`);
-        const pythonResponse = await axios.post(`${ML_ENGINE_URL}/predict`, { ticker: key });
+        const pythonResponse = await axios.post(`${ML_ENGINE_URL}/predict`, {
+            ticker: tickerOnly,
+            preferred_model: normalizedModel || undefined,
+        });
         const data = pythonResponse.data;
 
         // 3. Save the risk insight (non-blocking).
@@ -52,7 +62,7 @@ exports.generatePrediction = async (req, res) => {
         // search just never shows up in anyone's "Recent Risk Insights".
         Insight.create({
             userId: req.user ? req.user._id : null,
-            ticker: key,
+            ticker: tickerOnly,
             riskScore: data.risk || 0,
             confidence: data.confidence || 0,
             category: data.category || "Unknown"
@@ -64,7 +74,7 @@ exports.generatePrediction = async (req, res) => {
         // Non-blocking — a logging failure should never break the user's response.
         if (data.model_comparison && data.best_model) {
             Experiment.create({
-                ticker: key,
+                ticker: tickerOnly,
                 modelComparison: data.model_comparison,
                 bestModel: data.best_model,
                 topFeatures: (data.feature_importance || []).slice(0, 3).map(f => ({
