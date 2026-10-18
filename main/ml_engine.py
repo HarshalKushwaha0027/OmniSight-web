@@ -137,6 +137,11 @@ def get_shap_drivers(best_model, model_name, X_train, X_ml):
 # ─── Input schemas ────────────────────────────────────────────────────────────
 class PredictionData(BaseModel):
     ticker: str
+    # Optional: "Logistic Regression" | "Random Forest" | "Gradient Boosting"
+    # When provided and valid, this model's results power the prediction
+    # instead of the auto-selected best-by-F1 model. All three models are
+    # still trained either way (needed for the comparison table).
+    preferred_model: str | None = None
 
 
 # ─── Main prediction endpoint ─────────────────────────────────────────────────
@@ -344,12 +349,19 @@ def generate_risk_prediction(data: PredictionData):
             "accuracy":  metrics["accuracy"],
         })
 
-    # -------- 6. PICK THE BEST MODEL (by F1, AUC as tiebreaker) --------
-    best_entry      = max(comparison, key=lambda m: (m["f1"], m["auc"]))
-    best_model_name = best_entry["model"]
-    best_model      = trained[best_model_name]
+    # -------- 6. PICK THE MODEL (user-selected override, or auto by F1) --------
+    model_selection_mode = "auto"
+    if data.preferred_model and data.preferred_model in trained:
+        best_model_name = data.preferred_model
+        best_model      = trained[best_model_name]
+        best_entry      = next(c for c in comparison if c["model"] == best_model_name)
+        model_selection_mode = "user"
+    else:
+        best_entry      = max(comparison, key=lambda m: (m["f1"], m["auc"]))
+        best_model_name = best_entry["model"]
+        best_model      = trained[best_model_name]
 
-    print(f"[{asset}] Best model: {best_model_name} (AUC {best_entry['auc']}, F1 {best_entry['f1']})")
+    print(f"[{asset}] {model_selection_mode.upper()} model: {best_model_name} (AUC {best_entry['auc']}, F1 {best_entry['f1']})")
 
     # -------- 7. FEATURE IMPORTANCE (NEW) --------
     feature_importance = get_feature_importance(best_model, best_model_name)
@@ -414,6 +426,7 @@ def generate_risk_prediction(data: PredictionData):
         "best_model": {
             "name":    best_model_name,
             "metrics": best_entry,
+            "selection_mode": model_selection_mode,  # "auto" or "user"
         },
         "model_comparison": comparison,
 
