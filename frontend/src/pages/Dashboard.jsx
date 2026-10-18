@@ -11,7 +11,7 @@ import ModelPerformancePanel from "../components/dashboard/ModelPerformancePanel
 import RiskExplanationCard from "../components/dashboard/RiskExplanationCard";
 import ModelComparisonTable from "../components/dashboard/ModelComparisonTable";
 import FeatureImportanceCard from "../components/dashboard/FeatureImportanceCard";
-import { Bookmark, BookmarkCheck, ExternalLink } from "lucide-react";
+import { Bookmark, BookmarkCheck, ExternalLink, ChevronDown } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
@@ -44,6 +44,14 @@ function Dashboard() {
 
   const [isWatchlisted, setIsWatchlisted] = useState(false);
   const [isWatchlistBusy, setIsWatchlistBusy] = useState(false);
+
+  const MODEL_OPTIONS = ["Auto", "Logistic Regression", "Random Forest", "Gradient Boosting"];
+  const [selectedModel, setSelectedModel] = useState("Auto");
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const modelMenuRef = useRef(null);
+  const isFirstModelRender = useRef(true);
+
+  const [companyName, setCompanyName] = useState("");
 
   const [recentInsights, setRecentInsights]   = useState([]);
   const [prediction, setPrediction]           = useState(null);
@@ -95,11 +103,15 @@ function Dashboard() {
       const response = await fetch(`${API_BASE}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader() },
-        body: JSON.stringify({ ticker: tickerToSearch.toUpperCase() }),
+        body: JSON.stringify({
+          ticker: tickerToSearch.toUpperCase(),
+          preferredModel: selectedModel !== "Auto" ? selectedModel : undefined,
+        }),
       });
       const data = await response.json();
       if (response.ok) {
         setPrediction(data);
+        resolveCompanyName(tickerToSearch.toUpperCase());
       } else {
         // Previously silent — the user saw nothing at all on a failed prediction.
         showToast(data.error || "Couldn't generate a prediction for this ticker. Please try again.", "error");
@@ -111,7 +123,45 @@ function Dashboard() {
       setIsLoading(false);
       fetchHistory(); // now correctly in scope
     }
-  }, [fetchHistory, showToast]);
+  }, [fetchHistory, showToast, selectedModel]);
+
+  // ── Company name resolution ─────────────────────────────────────────────
+  // A ticker like "MSFT" means nothing to most people. Look up the full
+  // name via the same search endpoint used for autocomplete, reusing its
+  // cache server-side so this doesn't add meaningful extra load.
+  const resolveCompanyName = useCallback(async (ticker) => {
+    try {
+      const response = await fetch(`${API_BASE}/search?q=${ticker}`);
+      const data = await response.json();
+      if (response.ok && Array.isArray(data)) {
+        const exact = data.find((item) => item.ticker === ticker) || data[0];
+        setCompanyName(exact ? exact.name : "");
+      }
+    } catch {
+      setCompanyName(""); // fail silently — the ticker pill alone is still useful
+    }
+  }, []);
+
+  // ── Re-run the current prediction when the model selection changes ──────
+  useEffect(() => {
+    if (isFirstModelRender.current) {
+      isFirstModelRender.current = false;
+      return;
+    }
+    if (searchQuery) executeSearch(searchQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModel]);
+
+  // Close the model dropdown on outside click
+  useEffect(() => {
+    function handleOutsideClick(e) {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target)) {
+        setIsModelMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
 
   // Autocomplete suggestions
   useEffect(() => {
@@ -226,25 +276,73 @@ function Dashboard() {
         prediction: predictionRef, performance: performanceRef,
       }}
     >
-      {/* Floating ticker pill */}
-      <div className="fixed top-9 right-10 z-50 bg-slate-900/80 backdrop-blur-md border border-[#00AB55]/30 text-white px-5 py-2 rounded-full shadow-[0_0_15px_rgba(0,171,85,0.1)] flex items-center gap-3">
-        <span className="w-2 h-2 rounded-full bg-[#00AB55] animate-pulse" />
-        <span className="font-bold tracking-wider uppercase text-sm">{searchQuery || "MARKET"}</span>
+      {/* Ticker pill, company name, model selector — single stacked column */}
+      <div className="fixed top-9 right-10 z-50 flex flex-col items-end gap-2">
 
-        {isAuthenticated && searchQuery && (
-          <button
-            onClick={handleToggleWatchlist}
-            disabled={isWatchlistBusy}
-            title={isWatchlisted ? "Remove from watchlist" : "Add to watchlist"}
-            className={`ml-1 p-1 rounded-full transition disabled:opacity-50 ${
-              isWatchlisted
-                ? "text-[#00AB55] hover:text-white"
-                : "text-slate-400 hover:text-[#00AB55]"
-            }`}
-          >
-            {isWatchlisted ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
-          </button>
+        {/* 1. Ticker pill */}
+        <div className="bg-slate-900/80 backdrop-blur-md border border-[#00AB55]/30 text-white px-5 py-2 rounded-full shadow-[0_0_15px_rgba(0,171,85,0.1)] flex items-center gap-3 whitespace-nowrap">
+          <span className="w-2 h-2 rounded-full bg-[#00AB55] animate-pulse shrink-0" />
+          <span className="font-bold tracking-wider uppercase text-sm">{searchQuery || "MARKET"}</span>
+
+          {isAuthenticated && searchQuery && (
+            <button
+              onClick={handleToggleWatchlist}
+              disabled={isWatchlistBusy}
+              title={isWatchlisted ? "Remove from watchlist" : "Add to watchlist"}
+              className={`ml-1 p-1 rounded-full transition disabled:opacity-50 shrink-0 ${
+                isWatchlisted
+                  ? "text-[#00AB55] hover:text-white"
+                  : "text-slate-400 hover:text-[#00AB55]"
+              }`}
+            >
+              {isWatchlisted ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+            </button>
+          )}
+        </div>
+
+        {/* 2. Company name pill */}
+        {companyName && (
+          <div className="bg-slate-900/70 backdrop-blur-md border border-slate-700/40 text-slate-400 px-4 py-1 rounded-full text-xs whitespace-nowrap">
+            {companyName}
+          </div>
         )}
+
+        {/* 3. Model selector */}
+        <div className="relative shrink-0" ref={modelMenuRef}>
+          <button
+            onClick={() => setIsModelMenuOpen((v) => !v)}
+            className="bg-slate-900/80 backdrop-blur-md border border-slate-700/50 text-white pl-3 pr-2.5 py-1.5 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.35)] flex items-center gap-1.5 text-xs whitespace-nowrap hover:border-[#00AB55]/40 transition"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00AB55] shrink-0" />
+            <span className="text-slate-400">Model:</span>
+            <span className="font-semibold">{selectedModel}</span>
+            <ChevronDown size={12} className={`text-slate-500 transition-transform shrink-0 ${isModelMenuOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {isModelMenuOpen && (
+            <div className="absolute top-full right-0 mt-2 w-52 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+              {MODEL_OPTIONS.map((model) => (
+                <button
+                  key={model}
+                  onClick={() => {
+                    setSelectedModel(model);
+                    setIsModelMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-4 py-2.5 text-sm transition flex items-center justify-between ${
+                    selectedModel === model
+                      ? "bg-[#00AB55]/10 text-[#00AB55]"
+                      : "text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  {model}
+                  {model === "Auto" && (
+                    <span className="text-[10px] text-slate-500">best by F1</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Overview ── */}
@@ -294,11 +392,22 @@ function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Risk Score</h2>
-              <p className="text-5xl font-bold text-[#00AB55] mt-6">{risk}</p>
+              {/* Follows the category: High=red, Moderate=yellow, Low=green */}
+              <p className={`text-5xl font-bold mt-6 ${
+                category === "High" ? "text-red-400" : category === "Moderate" ? "text-yellow-400" : "text-[#00AB55]"
+              }`}>
+                {risk}
+              </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Confidence</h2>
-              <p className="text-5xl font-bold text-[#00AB55] mt-6">{confidence}%</p>
+              {/* Confidence is the model's own certainty, colored by its
+                  value — not tied to whether the risk itself is high or low */}
+              <p className={`text-5xl font-bold mt-6 ${
+                confidence >= 80 ? "text-[#00AB55]" : confidence >= 60 ? "text-yellow-400" : "text-red-400"
+              }`}>
+                {confidence}%
+              </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
               <h2 className="text-slate-400 text-lg">Category</h2>
