@@ -37,19 +37,40 @@ FEATURE_NAMES = list(FEATURE_LABELS.keys())   # fixed order used everywhere
 
 # ─── Helper: evaluate any trained classifier on the test set ─────────────────
 def evaluate_model(model, X_test, y_test):
+    # Accuracy is always computable regardless of class balance, so compute
+    # it up front — it should never get zeroed out just because a different
+    # metric below turns out to be undefined.
+    preds    = model.predict(X_test)
+    accuracy = round(accuracy_score(y_test, preds) * 100, 1)
+
+    # AUC/precision/recall/F1 are only meaningful when the test window
+    # contains both classes. With a single class, roc_auc_score raises and
+    # precision/recall/F1 collapse to a degenerate, misleading value. Rather
+    # than hard-failing the whole request or reporting a false "0", surface
+    # these as unavailable (None) and let the caller flag reduced
+    # reliability instead.
+    if y_test.nunique() < 2:
+        return {
+            "auc": None, "precision": None, "recall": None, "f1": None,
+            "accuracy": accuracy, "reliable": False,
+        }
+
     try:
         probs = model.predict_proba(X_test)[:, 1]
-        preds = model.predict(X_test)
         return {
             "auc":       round(roc_auc_score(y_test, probs), 3),
             "precision": round(precision_score(y_test, preds, zero_division=0), 3),
             "recall":    round(recall_score(y_test, preds, zero_division=0), 3),
             "f1":        round(f1_score(y_test, preds, zero_division=0), 3),
-            "accuracy":  round(accuracy_score(y_test, preds) * 100, 1),
+            "accuracy":  accuracy,
+            "reliable":  True,
         }
     except Exception as e:
         print(f"evaluate_model error: {e}")
-        return {"auc": 0, "precision": 0, "recall": 0, "f1": 0, "accuracy": 0}
+        return {
+            "auc": None, "precision": None, "recall": None, "f1": None,
+            "accuracy": accuracy, "reliable": False,
+        }
 
 
 # ─── Helper: feature importance for ANY of the 3 models ──────────────────────
@@ -306,11 +327,13 @@ def generate_risk_prediction(data: PredictionData):
         y_train = y_ml.iloc[:split_idx]
         y_test  = y_ml.iloc[split_idx:]
 
-    if y_test.nunique() < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="Not enough class diversity in recent data to evaluate this ticker reliably."
-        )
+    # If even the widest allowed test window (max_test_fraction) still has
+    # only one class, don't block the request: tickers like ETH-USD, or
+    # TSLA in certain periods, can legitimately have no high-risk days in
+    # their recent history. A degraded-but-usable prediction beats a hard
+    # 400 here — we fall back to accuracy-only metrics and flag the
+    # response so the frontend can show reduced confidence.
+    reduced_reliability = y_test.nunique() < 2
 
     # -------- 5. TRAIN ALL THREE MODELS --------
     models = {
@@ -357,7 +380,13 @@ def generate_risk_prediction(data: PredictionData):
         best_entry      = next(c for c in comparison if c["model"] == best_model_name)
         model_selection_mode = "user"
     else:
-        best_entry      = max(comparison, key=lambda m: (m["f1"], m["auc"]))
+        if reduced_reliability:
+            # F1/AUC are None for every model here (same y_test for all
+            # three), so sorting on them would raise. Rank by accuracy
+            # instead — still a meaningful, if weaker, comparison signal.
+            best_entry = max(comparison, key=lambda m: m["accuracy"])
+        else:
+            best_entry = max(comparison, key=lambda m: (m["f1"], m["auc"]))
         best_model_name = best_entry["model"]
         best_model      = trained[best_model_name]
 
@@ -427,8 +456,23 @@ def generate_risk_prediction(data: PredictionData):
             "name":    best_model_name,
             "metrics": best_entry,
             "selection_mode": model_selection_mode,  # "auto" or "user"
+            "ranked_by": "accuracy" if reduced_reliability else "f1",
         },
         "model_comparison": comparison,
+
+        # NEW: tells the frontend this prediction used accuracy-only
+        # metrics because the recent evaluation window had only one risk
+        # class (e.g. ETH-USD, or TSLA in some periods), rather than
+        # silently showing undefined AUC/precision/recall as 0 or null.
+        "reliability": {
+            "degraded": reduced_reliability,
+            "note": (
+                "Recent data for this ticker contains only one risk class "
+                "in the evaluation window, so AUC/precision/recall/F1 "
+                "could not be computed. Showing accuracy only — treat this "
+                "prediction as lower-confidence."
+            ) if reduced_reliability else None,
+        },
 
         # NEW: transparency about how models were validated
         "validation": {
