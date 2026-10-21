@@ -94,6 +94,19 @@ function Dashboard() {
     }
   }, [isAuthenticated, authHeader]);
 
+  // selectedModel is read through this ref (not a useCallback dependency)
+  // so that executeSearch's identity stays stable across model changes.
+  // It used to depend on selectedModel directly, which meant every model
+  // switch produced a brand-new executeSearch function — and that, in
+  // turn, retriggered the "Initial load" effect below (whose deps include
+  // executeSearch), firing a second, concurrent prediction call for the
+  // stale URL ticker that could race ahead of and overwrite the correct
+  // one. See: ticker snapping back to the previous value on model change.
+  const selectedModelRef = useRef(selectedModel);
+  useEffect(() => {
+    selectedModelRef.current = selectedModel;
+  }, [selectedModel]);
+
   const executeSearch = useCallback(async (tickerToSearch) => {
     if (!tickerToSearch.trim()) return;
     setIsLoading(true);
@@ -105,7 +118,7 @@ function Dashboard() {
         headers: { "Content-Type": "application/json", ...authHeader() },
         body: JSON.stringify({
           ticker: tickerToSearch.toUpperCase(),
-          preferredModel: selectedModel !== "Auto" ? selectedModel : undefined,
+          preferredModel: selectedModelRef.current !== "Auto" ? selectedModelRef.current : undefined,
         }),
       });
       const data = await response.json();
@@ -123,7 +136,7 @@ function Dashboard() {
       setIsLoading(false);
       fetchHistory(); // now correctly in scope
     }
-  }, [fetchHistory, showToast, selectedModel]);
+  }, [fetchHistory, showToast]);
 
   // ── Company name resolution ─────────────────────────────────────────────
   // A ticker like "MSFT" means nothing to most people. Look up the full
