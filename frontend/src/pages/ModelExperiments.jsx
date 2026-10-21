@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 
-const API_BASE = "https://omnisight-api.onrender.com/api";
+import { API_BASE } from "../config";
 
 const modelBadge = {
   "Logistic Regression": "bg-blue-500/10 text-blue-400 border border-blue-500/20",

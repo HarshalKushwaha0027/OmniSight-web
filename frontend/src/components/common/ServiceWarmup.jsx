@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
+import { BACKEND_URL, ML_ENGINE_URL } from "../../config";
 
-const BACKEND_URL = "https://omnisight-api.onrender.com/";
-const ML_ENGINE_URL = "https://omnisight-ml-engine.onrender.com/";
 const MAX_WAIT_MS = 60000;      // never block longer than 60s no matter what
 const MIN_SHOW_MS = 1500;       // avoid an annoying flash if services are already warm
 

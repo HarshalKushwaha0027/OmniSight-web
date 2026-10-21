@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 
-const API_BASE = "https://omnisight-api.onrender.com/api";
+import { API_BASE } from "../config";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {

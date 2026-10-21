@@ -15,7 +15,7 @@ import { Bookmark, BookmarkCheck, ExternalLink, ChevronDown } from "lucide-react
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
-const API_BASE = "https://omnisight-api.onrender.com/api";
+import { API_BASE } from "../config";
 const DEBOUNCE_MS = 350;
 
 function useDebounce(value, delay) {

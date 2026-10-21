@@ -3,7 +3,7 @@ import { Settings as SettingsIcon, CheckCircle2, AlertTriangle, Moon, Sun, Bell,
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../context/AuthContext";
 
-const API_BASE = "https://omnisight-api.onrender.com/api";
+import { API_BASE } from "../config";
 
 function Settings() {
   const { user, authHeader, refreshUser } = useAuth();
